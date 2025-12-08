@@ -8,7 +8,12 @@
             <mapping deploy="/tmp/tmp.wY6etoHwVK/lepton" local="$PROJECT_DIR$" />
           </mappings>
           <excludedPaths>
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-minsizerel" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-relwithdebinfo" />
             <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-debug-remote-host-1" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-debug" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-default" />
+            <excludedPath local="true" path="$PROJECT_DIR$/cmake-build-default-1" />
           </excludedPaths>
         </serverdata>
       </paths>

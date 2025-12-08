@@ -50,23 +50,19 @@ the Free Software Foundation; either version 2 of the License.
  */
 
 
-#include <chrono>
 #include <stdint.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <getopt.h>
 #include <fcntl.h>
-#include <iostream>
 #include <sys/ioctl.h>
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
 #include <limits.h>
-#include <ostream>
 #include <string.h>
 #include <time.h>
-#include <iostream>
-#include <thread>
+
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 
 static void pabort(const char *s)
@@ -79,7 +75,7 @@ static const char *device = "/dev/spidev0.0";
 static uint8_t mode = SPI_CPOL | SPI_CPHA;
 static uint8_t bits = 8;
 static uint32_t speed = 16000000;
-static uint16_t delay = 65535;
+static uint16_t delay = 0;
 static uint8_t status_bits = 0;
 
 int8_t last_packet = -1;
@@ -101,7 +97,7 @@ static void save_pgm_file(void)
     int image_index = 0;
 
     do {
-        sprintf(image_name, "IMG_%.4d.pgm", image_index);
+        sprintf(image_name, "images/IMG_%.4d.pgm", image_index);
         image_index += 1;
         if (image_index > 9999)
         {
@@ -175,8 +171,8 @@ int transfer(int fd)
         .tx_buf = (unsigned long)NULL,
         .rx_buf = (unsigned long)rx_buf,
         .len = LEP_SPI_BUFFER,
-        .speed_hz = speed,
         .delay_usecs = delay,
+        .speed_hz = speed,
         .bits_per_word = bits
     };
 
@@ -195,6 +191,7 @@ int transfer(int fd)
         }
 
         packet_number = rx_buf[packet + 1];
+
         if(packet_number > 0 && state == 0) {
             continue;
         }
@@ -283,13 +280,7 @@ int main(int argc, char *argv[])
     printf("bits per word: %d\n", bits);
     printf("max speed: %d Hz (%d KHz)\n", speed, speed/1000);
 
-    while (1)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(150));
-        while(status_bits != 0x0f) { transfer(fd); }
-        std::cout << "New frame!" << std::endl;
-        status_bits = 0x00;
-    }
+    while(status_bits != 0x0f) { transfer(fd); }
 
     close(fd);
 
