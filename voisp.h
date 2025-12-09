@@ -4,10 +4,14 @@
 #include <cstdint>
 #include <cassert>
 #include <optional>
+#include <cstdint>
+#include <cstring>
 namespace VoISP {
     constexpr size_t VoISPPacketSize = 4+160;
 
-
+    uint16_t swapBytes(uint16_t val) {
+        return (val >> 8) | (val << 8);
+    }
 
 
     static inline uint16_t packet_id(const uint8_t* packet) {
@@ -33,13 +37,27 @@ namespace VoISP {
     }
 
     static inline std::optional<uint8_t> getSegmentNumber(uint16_t id16) {
-        const auto ttt = getTTTBits(id16);
+
         const auto packetNo = getPacketNumber(id16);
         if (packetNo != 20) {
             return std::nullopt;
-        } else {
-            return ttt;
         }
+        const auto ttt = getTTTBits(id16);
+        return ttt;
+    }
+
+    static const std::array<uint16_t, 80> GetImageLine(const uint8_t* packet) {
+        std::array<uint16_t, 80> line{};
+        assert(packet != nullptr);
+        const uint8_t* dataBegin = packet + 4; // skip ID and CRC
+
+        for (std::size_t i = 0; i < line.size(); ++i) {
+            const std::size_t off = 2 * i;
+            line[i] = (static_cast<uint16_t>(dataBegin[off]) << 8)
+                    | static_cast<uint16_t>(dataBegin[off + 1]);
+        }
+
+        return line;
     }
 
     static inline uint16_t computeCRC(const uint8_t* packet, size_t size) {
@@ -61,11 +79,5 @@ namespace VoISP {
         return crc;
     }
 
-
-    struct VideoFrame {
-
-        std::vector<std::vector<uint16_t>> lepton_image; // [pixel][value]
-
-    };
 
 }
