@@ -229,10 +229,6 @@ int main() {
     // Ok, I need to wait for GPIO
     uint8_t rx_buf[LEP_SPI_BUFFER];
 
-
-
-    std::mutex mtx;
-    std::condition_variable cv;
     bool ready = false;  // shared state, protected by mtx
     uint8_t tx_dummy[LEP_SPI_BUFFER] = {0};
     struct spi_ioc_transfer tr = {
@@ -252,33 +248,60 @@ int main() {
     std::mutex segmentsMtx;
     std::condition_variable segmentCv;
 
-    // std::thread imageThread([&]() {
-    //     for (;;) {
-    //         std::array<SegmentData, 4> segmentsLocalWork;
-    //         {
-    //             std::unique_lock<std::mutex> lk(segmentsMtx);
-    //             segmentCv.wait(lk, [&]() { return segmentCount == 4; });
-    //             std::swap(segments, segmentsLocalWork);
-    //             segmentCount = 0;
-    //         }
-    //
-    //         // we have local copy to work on
-    //         unsigned int lepton_image[240][80];
-    //         for (int segmentId=0; segmentId < segmentsLocalWork.size(); segmentId++) {
-    //             const auto& segmentData = segmentsLocalWork[segmentId];
-    //             for (int rowInSegment = 0; rowInSegment < 60; rowInSegment++)
-    //             {
-    //                 const int row = rowInSegment + 60 *segmentId;
-    //                 const auto lineData = VoISP::GetImageLine(segmentData.data());
-    //                 for (int col = 0; col < 80; col++) {
-    //                     lepton_image[row][col] = lineData[col];
-    //                 }
-    //             }
-    //         }
-    //         std::cout << "Image received, saving to PGM file..." << std::endl;
-    //         save_pgm_file(lepton_image);
-    //     }
-    // });
+    std::thread savenetThread([&]() {
+
+        for (;;) {
+            std::array<SegmentData, 4> segmentsCopy {};
+            {
+                std::unique_lock<std::mutex> lk(segmentsMtx);
+                segmentCv.wait(lk, [&]() {
+                    return segmentCount == 4;
+                });
+
+                std::swap(segmentsCopy, segments);
+                segmentCount = 0;
+            }
+
+            unsigned int lepton_image[240][80];
+            for (int segmentId = 0; segmentId < segmentsCopy.size(); segmentId++) {
+                const auto &segmentData = segmentsCopy[segmentId];
+
+                // get package 20
+                const auto *packetPtr = segmentData.data() + 20 * VOSPI_FRAME_SIZE;
+                const auto header = VoISP::packet_id(packetPtr);
+                const auto segmentId2 = VoISP::getSegmentNumber(header);
+                std::cout << "Segment: " << (int) *segmentId2 << " " << segmentId << std::endl;
+
+
+                for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
+                    const auto *packetPtr = segmentData.data() + rowInSegment * VOSPI_FRAME_SIZE;
+                    // check if discard
+                    bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
+                    if (isDiscard) {
+                        continue;
+                    }
+                    const auto crcA = VoISP::packet_crc(packetPtr);
+                    const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
+                    bool isCRCValid = (crcA == crcC);
+
+                    const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
+                    const int row = packetNo + 60 * segmentId;
+                    const auto lineData = VoISP::GetImageLine(packetPtr);
+                    for (int col = 0; col < 80; col++) {
+                        // I need to swap bytes in
+                        lepton_image[row][col] = (lineData[col]);
+                    }
+                }
+            }
+            std::cout << "Image received, saving to PGM file..." << std::endl;
+            static int count = 0;
+            count++;
+            std::string filename = "lepton_image_" + std::to_string(count) + ".pgm";
+            save_pgm_file(lepton_image, filename);
+
+            std::cout << "Done!" << std::endl;
+        }
+    });
 
     std::thread gpioThread([&]()
     {
@@ -332,49 +355,10 @@ int main() {
             }
             std::cout << "\n";
             std::cout << "Packets: " << packetsOk << " Discared " << packetsDiscarded << " crc errors " << crcErrors << " seg " << (int)segment.value_or(-1)  << "\n";
-
+            std::unique_lock<std::mutex> lk(segmentsMtx);
             if (segmentCount == 4) {
                 std::cout << "\nImage! " << std::endl;
-                //
-
-               unsigned int lepton_image[240][80];
-               for (int segmentId=0; segmentId < segments.size(); segmentId++) {
-                   const auto& segmentData = segments[segmentId];
-
-                   // get package 20
-                   const auto * packetPtr = segmentData.data() + 20 * VOSPI_FRAME_SIZE;
-                   const auto header = VoISP::packet_id(packetPtr);
-                   const auto segmentId2 = VoISP::getSegmentNumber(header);
-                    std::cout << "Segment: " << (int)*segmentId2  << " " << segmentId << std::endl;
-
-
-                   for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++)
-                   {
-                       const auto * packetPtr = segmentData.data() + rowInSegment * VOSPI_FRAME_SIZE;
-                        // check if discard
-                       bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
-                       if (isDiscard) {
-                           continue;
-                       }
-                       const auto crcA = VoISP::packet_crc(packetPtr);
-                       const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
-                       bool isCRCValid = (crcA == crcC);
-                       if (!isCRCValid) {
-                           continue;
-                       }
-                       const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
-                       const int row = packetNo + 60 *segmentId;
-                       const auto lineData = VoISP::GetImageLine(packetPtr);
-                       for (int col = 0; col < 80; col++) {
-                           // I need to swap bytes in
-                           lepton_image[row][col] = (lineData[col]);
-                       }
-                   }
-               }
-               std::cout << "Image received, saving to PGM file..." << std::endl;
-               save_pgm_file(lepton_image);
-                std::abort();
-
+                segmentCv.notify_one();
             }
        }
     });

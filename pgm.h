@@ -1,16 +1,16 @@
 #pragma once
 #include <stdio.h>
 
-static void save_pgm_file(unsigned int lepton_image[240][80])
+static void save_pgm_file(unsigned int lepton_image[240][80], std::string image_name)
 {
     int i;
     int j;
     unsigned int maxval = 0;
     unsigned int minval = UINT_MAX;
-    char image_name[32] = "IMG.pgm";
+
     int image_index = 0;
 
-    FILE *f = fopen(image_name, "w+");
+    FILE *f = fopen(image_name.c_str(), "w+");
     if (f == NULL)
     {
         printf("Error opening file!\n");
