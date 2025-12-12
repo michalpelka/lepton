@@ -9,7 +9,7 @@
 namespace VoISP {
     constexpr size_t VoISPPacketSize = 4+160;
 
-    uint16_t swapBytes(uint16_t val) {
+    uint16_t inline swapBytes(uint16_t val) {
         return (val >> 8) | (val << 8);
     }
 
