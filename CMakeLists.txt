@@ -10,6 +10,9 @@ if(NOT GPIOD_LIBRARY)
     message(FATAL_ERROR "gpiod library not found. Install apt install libgpiod-dev")
 endif()
 
+find_package(OpenCV REQUIRED)
+message(STATUS "Found OpenCV ${OpenCV_VERSION}")
+
 add_subdirectory(leptonSDKEmb32PUB)
 include_directories(leptonSDKEmb32PUB/include)
 
@@ -17,7 +20,8 @@ add_executable(readRawLepton leptonRawRead.cpp)
 add_executable(readRawLeptonEx leptonRawReadEx.cpp )
 target_link_libraries(readRawLeptonEx PRIVATE gpiod)
 add_executable(testLepton testLepton.cpp cci.cpp cci.h)
-target_link_libraries(testLepton PRIVATE gpiod leptonSDK )
+# link OpenCV here
+target_link_libraries(testLepton PRIVATE gpiod leptonSDK ${OpenCV_LIBS})
 add_executable(captureLepton capture.c)
 
 enable_testing()

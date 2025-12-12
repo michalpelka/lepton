@@ -19,6 +19,8 @@
 #include <mutex>
 #include <thread>
 #include <iostream>
+// OpenCV display
+#include <opencv2/opencv.hpp>
 
 constexpr LEP_UINT16 kI2CPortID{1};
 constexpr LEP_UINT16 kI2CPortBaudRate{400};
@@ -263,6 +265,8 @@ int main() {
             }
 
             unsigned int lepton_image[240][80];
+            // initialize image to zero to avoid uninitialized pixels
+            for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
             for (int segmentId = 0; segmentId < segmentsCopy.size(); segmentId++) {
                 const auto &segmentData = segmentsCopy[segmentId];
 
@@ -270,38 +274,81 @@ int main() {
                 const auto *packetPtr = segmentData.data() + 20 * VOSPI_FRAME_SIZE;
                 const auto header = VoISP::packet_id(packetPtr);
                 const auto segmentId2 = VoISP::getSegmentNumber(header);
-                std::cout << "Segment: " << (int) *segmentId2 << " " << segmentId << std::endl;
+                if (segmentId2.has_value()) {
+                    std::cout << "Segment: " << (int)segmentId2.value() << " " << segmentId << std::endl;
+                } else {
+                    std::cout << "Segment: (unknown) " << segmentId << std::endl;
+                }
 
 
                 for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
-                    const auto *packetPtr = segmentData.data() + rowInSegment * VOSPI_FRAME_SIZE;
-                    // check if discard
-                    bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
-                    if (isDiscard) {
-                        continue;
-                    }
-                    const auto crcA = VoISP::packet_crc(packetPtr);
-                    const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
-                    bool isCRCValid = (crcA == crcC);
+                     const auto *packetPtr = segmentData.data() + rowInSegment * VOSPI_FRAME_SIZE;
+                     // check if discard
+                     bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
+                     if (isDiscard) {
+                         continue;
+                     }
+                     const auto crcA = VoISP::packet_crc(packetPtr);
+                     const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
+                     bool isCRCValid = (crcA == crcC);
 
                     const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
-                    const int row = packetNo + 60 * segmentId;
+                    if (packetNo >= 60) continue; // ignore out-of-range packet numbers
+                    const int row = static_cast<int>(packetNo) + 60 * segmentId;
+                    if (row < 0 || row >= 240) continue;
                     const auto lineData = VoISP::GetImageLine(packetPtr);
                     for (int col = 0; col < 80; col++) {
-                        // I need to swap bytes in
-                        lepton_image[row][col] = (lineData[col]);
+                        lepton_image[row][col] = lineData[col];
                     }
+                 }
+             }
+            std::cout << "Image received, preparing display..." << std::endl;
+
+            // Create the PGM-style interleaved image that save_pgm_file produced:
+            // PGM code wrote width=160, height=120 by writing pairs of rows (i and i+1)
+            const int pgm_w = 160;
+            const int pgm_h = 120;
+            cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
+
+            for (int i = 0; i < 240; i += 2) {
+                int out_row = i / 2; // 0..119
+                for (int j = 0; j < 80; ++j) {
+                    // left half (0..79) comes from row i
+                    pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
+                    // right half (80..159) comes from row i+1
+                    pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
                 }
             }
-            std::cout << "Image received, saving to PGM file..." << std::endl;
-            static int count = 0;
-            count++;
-            std::string filename = "lepton_image_" + std::to_string(count) + ".pgm";
-            save_pgm_file(lepton_image, filename);
 
-            std::cout << "Done!" << std::endl;
-        }
-    });
+            // Convert to 8-bit for display, scale using min/max like save_pgm_file does
+            uint16_t minv = UINT16_MAX, maxv = 0;
+            for (int r = 0; r < pgm_img.rows; ++r) {
+                for (int c = 0; c < pgm_img.cols; ++c) {
+                    uint16_t v = pgm_img.at<uint16_t>(r, c);
+                    if (v > maxv) maxv = v;
+                    if (v < minv) minv = v;
+                }
+            }
+            if (minv == maxv) maxv = minv + 1;
+
+            cv::Mat display_8u;
+            // scale to 0..255
+            pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), - (minv * 255.0 / (maxv - minv)));
+
+            // Also produce a small preview 120x60 by resizing the 160x120 down
+            cv::Mat preview;
+            cv::resize(display_8u, preview, cv::Size(120, 60), 0, 0, cv::INTER_AREA);
+
+            static const std::string winName = "Lepton PGM-style";
+            static const std::string previewWin = "Lepton preview 120x60";
+            cv::imshow(winName, display_8u);
+            cv::imshow(previewWin, preview);
+            // wait a short time to allow window update (non-blocking)
+            cv::waitKey(1);
+
+            std::cout << "Displayed image (pgm-style) and preview." << std::endl;
+         }
+     });
 
     std::thread gpioThread([&]()
     {
