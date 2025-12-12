@@ -17,7 +17,7 @@ add_subdirectory(leptonSDKEmb32PUB)
 include_directories(leptonSDKEmb32PUB/include)
 
 add_executable(readRawLepton leptonRawRead.cpp)
-add_executable(testLepton testLepton.cpp)
+add_executable(testLepton testLeptonApp.cpp)
 add_library(leptonLib lepton.cpp voisp.cpp )
 target_link_libraries(leptonLib PUBLIC gpiod leptonSDK ${OpenCV_LIBS})
 # link OpenCV here

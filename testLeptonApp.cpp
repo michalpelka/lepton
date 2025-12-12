@@ -57,10 +57,17 @@ int main()
         std::cout << "Uptime: " << uptime << " seconds\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
+    cv::VideoWriter writer(
+        "output.mp4",
+        cv::VideoWriter::fourcc('m','p','4','v'),  // codec
+        10,
+        cv::Size(180, 120)
+    );
 
-    const auto fun = [](cv::Mat& img) {
+    const auto fun = [&](cv::Mat& img) {
         cv::imshow("Foo", img);
         cv::waitKey(1);
+        writer.write(img);
 
     };
     cam.setFrameCallback(fun);
@@ -68,7 +75,7 @@ int main()
     cam.capture();
 
     // keep process alive to let capture run (or replace with a more graceful loop)
-    std::this_thread::sleep_for(std::chrono::hours(1));
+    std::this_thread::sleep_for(std::chrono::minutes(1));
 
     cam.shutdown();
     return 0;

@@ -158,8 +158,8 @@ namespace lepton {
         std::mutex segmentsMtx;
         std::condition_variable segmentCv;
 
-        std::thread savenetThread([&]() {
-            for (;;) {
+        m_savenetThread = std::thread([&]() {
+            for (;m_running;) {
                 std::array<SegmentData, 4> segmentsCopy{}; {
                     std::unique_lock<std::mutex> lk(segmentsMtx);
                     segmentCv.wait(lk, [&]() {
@@ -246,8 +246,8 @@ namespace lepton {
             }
         });
 
-        std::thread gpioThread([&]() {
-            for (;;) {
+        m_gpioThread = std::thread ([&]() {
+            for (;m_running;) {
                 int packetsOk = 0;
                 int packetsDiscarded = 0;
                 int crcErrors = 0;
@@ -319,7 +319,6 @@ namespace lepton {
 
             }
         });
-        std::this_thread::sleep_for(std::chrono::seconds(3600));
     }
 
     bool Lepton::configureOemGpio() {
@@ -344,25 +343,25 @@ namespace lepton {
 
     void Lepton::shutdown() {
         if (!m_running) return;
-        // m_running = false;
-        // if (m_gpioThread.joinable()) m_gpioThread.join();
-        // if (m_.joinable()) m_.join();
-        // if (spiFd >= 0) {
-        //     ::close(spiFd);
-        //     spiFd = -1;
-        // }
-        // if (vs_line) {
-        //     gpiod_line_release(vs_line);
-        //     vs_line = nullptr;
-        // }
-        // if (dbg_line) {
-        //     gpiod_line_release(dbg_line);
-        //     dbg_line = nullptr;
-        // }
-        // if (chip) {
-        //     gpiod_chip_close(chip);
-        //     chip = nullptr;
-        // }
+        m_running = false;
+         if (m_gpioThread.joinable()) m_gpioThread.join();
+         if (m_gpioThread.joinable()) m_gpioThread.join();
+        if (spiFd >= 0) {
+            ::close(spiFd);
+            spiFd = -1;
+        }
+        if (vs_line) {
+            gpiod_line_release(vs_line);
+            vs_line = nullptr;
+        }
+        if (dbg_line) {
+            gpiod_line_release(dbg_line);
+            dbg_line = nullptr;
+        }
+        if (chip) {
+            gpiod_chip_close(chip);
+            chip = nullptr;
+        }
         LEP_ClosePort(&m_lepPort);
     }
 } // namespace lepton

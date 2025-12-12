@@ -92,5 +92,8 @@ namespace lepton {
         int segmentCount = 0;
         std::mutex segmentsMtx;
         std::condition_variable segmentCv;
+        std::thread m_savenetThread;
+        std::thread m_gpioThread;
+
     };
 }
