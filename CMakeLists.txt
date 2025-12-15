@@ -16,13 +16,18 @@ message(STATUS "Found OpenCV ${OpenCV_VERSION}")
 add_subdirectory(leptonSDKEmb32PUB)
 include_directories(leptonSDKEmb32PUB/include)
 
-add_executable(readRawLepton leptonRawRead.cpp)
-add_executable(testLepton testLeptonApp.cpp)
+
+
 add_library(leptonLib lepton.cpp voisp.cpp )
 target_link_libraries(leptonLib PUBLIC gpiod leptonSDK ${OpenCV_LIBS})
-# link OpenCV here
+
+
+add_executable(readRawLepton leptonRawRead.cpp)
+add_executable(testLepton testLeptonApp.cpp)
+add_executable(testLeptonFile testLeptonFile.cpp)
+
 target_link_libraries(testLepton PRIVATE leptonLib)
-add_executable(captureLepton capture.c)
+target_link_libraries(testLeptonFile PRIVATE leptonLib)
 
 enable_testing()
 

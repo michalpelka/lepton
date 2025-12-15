@@ -16,7 +16,6 @@
 #include "voisp.h"
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
-#include "pgm.h"
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -170,6 +169,13 @@ namespace lepton {
                     segmentCount = 0;
                 }
 
+                if (frameRawData) {
+                    std::vector<uint8_t> rawData;
+                    for (const auto &segmentData : segmentsCopy) {
+                        rawData.insert(rawData.end(), segmentData.begin(), segmentData.end());
+                    }
+                    frameRawData(rawData);
+                }
                 unsigned int lepton_image[240][80];
                 // initialize image to zero to avoid uninitialized pixels
                 for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
@@ -210,8 +216,7 @@ namespace lepton {
                     }
                 }
 
-                // Create the PGM-style interleaved image that save_pgm_file produced:
-                // PGM code wrote width=160, height=120 by writing pairs of rows (i and i+1)
+
                 const int pgm_w = 160;
                 const int pgm_h = 120;
                 cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
@@ -224,6 +229,10 @@ namespace lepton {
                         // right half (80..159) comes from row i+1
                         pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
                     }
+                }
+
+                if (frameCallbackNoScale) {
+                    frameCallbackNoScale(pgm_img);
                 }
 
                 // Convert to 8-bit for display, scale using min/max like save_pgm_file does

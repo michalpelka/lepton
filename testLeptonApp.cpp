@@ -5,6 +5,7 @@
 #include <errno.h>
 
 #include "lepton.h"
+#include "fstream"
 
 constexpr int VSYNC_GPIO = 21;
 constexpr int DEBUG_GPIO_OUT = 20;
@@ -58,11 +59,28 @@ int main()
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     cv::VideoWriter writer(
-        "output.mp4",
-        cv::VideoWriter::fourcc('m','p','4','v'),  // codec
+        "output.avi",
+        cv::VideoWriter::fourcc('M','J','P','G'),  // codec
         10,
-        cv::Size(180, 120)
+        cv::Size(160, 120),
+        false
     );
+
+    int frameNo = 0;
+    const auto funRaw = [&](std::vector<uint8_t>& packet) {
+        char data[128];
+        snprintf(data, sizeof(data), "frame%04d.bin", frameNo++);
+        std::ofstream out(data, std::ios::binary);
+        out.write(reinterpret_cast<char*>(packet.data()), packet.size());
+        frameNo++;
+    };
+
+    const auto funImgRaw = [&](cv::Mat& img) {
+        char data[128];
+        snprintf(data, sizeof(data), "frame%04d.png", frameNo);
+        cv::imwrite(data, img);
+    };
+
 
     const auto fun = [&](cv::Mat& img) {
         cv::imshow("Foo", img);
@@ -70,13 +88,15 @@ int main()
         writer.write(img);
 
     };
+    cam.setRawFrameCallback(funRaw);
+    cam.setFrameWithoutScale(funImgRaw);
     cam.setFrameCallback(fun);
 
     cam.capture();
 
     // keep process alive to let capture run (or replace with a more graceful loop)
     std::this_thread::sleep_for(std::chrono::minutes(1));
-
+    writer.release();
     cam.shutdown();
     return 0;
 }

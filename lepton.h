@@ -15,7 +15,6 @@
 #include "voisp.h"
 #include <linux/types.h>
 #include <linux/spi/spidev.h>
-#include "pgm.h"
 #include <condition_variable>
 #include <mutex>
 #include <thread>
@@ -23,6 +22,7 @@
 // OpenCV display
 #include <opencv2/opencv.hpp>
 #include <functional>
+#include <span>
 
 namespace lepton {
     class Lepton
@@ -48,17 +48,25 @@ namespace lepton {
 
         // query camera uptime (returns false if SDK call fails)
         bool getCameraUptime(uint32_t &uptime);
-
+        void setFrameWithoutScale(std::function<void(cv::Mat&)> cb) {
+            frameCallbackNoScale = std::move(cb);
+        }
         void setFrameCallback(std::function<void(cv::Mat&)> cb)
         {
-            frameCallback = cb;
+            frameCallback = std::move(cb);
         }
+        void setRawFrameCallback(std::function<void(std::vector<uint8_t>&)> cb) {
+            frameRawData = std::move(cb);
+        }
+
+        bool ProcessBlob(uint8_t* blob, size_t blobSize);
 
         bool GPIO_GetVsync() ;
 
         void GPIO_DebugSet(bool high);
 
     private:
+        void processDataSegments(const std::vector<std::pair<const uint8_t*, size_t>>& segments);
         // config
         int m_gpioVsync = 0;
         int m_gpioDebug = 0;
@@ -79,6 +87,8 @@ namespace lepton {
 
         // capture/frame handling
         std::function<void(cv::Mat&)> frameCallback;
+        std::function<void(cv::Mat&)> frameCallbackNoScale;
+        std::function<void(std::vector<uint8_t>&)> frameRawData;
 
         // internal threads and coordination
         std::atomic<bool> m_running{false};
