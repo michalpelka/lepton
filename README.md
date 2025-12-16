@@ -147,16 +147,16 @@ The library provides three types of callbacks:
 
 The repository includes several example applications:
 
-- **testLeptonApp** - Live camera capture with display
-- **testLeptonFile** - Process recorded thermal frames from file
+- **testLeptonApp** - Live camera capture with display (requires hardware)
 - **readRawLepton** - Raw data reading utility
 
 Build and run examples:
 ```bash
 cd build
 ./testLeptonApp      # Live capture (requires hardware)
-./testLeptonFile     # Process sample data
 ```
+
+Note: `testLeptonFile` is currently not built as it requires an unimplemented function.
 
 ## VoSPI Protocol
 
