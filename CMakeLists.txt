@@ -24,10 +24,10 @@ target_link_libraries(leptonLib PUBLIC gpiod leptonSDK ${OpenCV_LIBS})
 
 add_executable(readRawLepton leptonRawRead.cpp)
 add_executable(testLepton testLeptonApp.cpp)
-add_executable(testLeptonFile testLeptonFile.cpp)
+# add_executable(testLeptonFile testLeptonFile.cpp)
 
 target_link_libraries(testLepton PRIVATE leptonLib)
-target_link_libraries(testLeptonFile PRIVATE leptonLib)
+# target_link_libraries(testLeptonFile PRIVATE leptonLib)
 
 enable_testing()
 
