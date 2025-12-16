@@ -28,6 +28,14 @@ namespace lepton {
     class Lepton
     {
     public:
+        static constexpr size_t VOSPI_FRAME_SIZE = 164;
+        static constexpr size_t BUFFER_VOSPI_FRAMES_MIN = 60;
+
+        static constexpr size_t BUFFER_VOSPI_FRAMES = 75;
+
+        static constexpr size_t LEP_SPI_BUFFER = VOSPI_FRAME_SIZE * BUFFER_VOSPI_FRAMES;
+        static cv::Mat processDataSegmentsToMatU16(const std::vector<std::vector<uint8_t>>& segmentsToProcess);
+
         Lepton();
         ~Lepton();
 
@@ -48,10 +56,10 @@ namespace lepton {
 
         // query camera uptime (returns false if SDK call fails)
         bool getCameraUptime(uint32_t &uptime);
-        void setFrameWithoutScale(std::function<void(cv::Mat&)> cb) {
+        void setFrameWithoutScale(std::function<void(const cv::Mat&)> cb) {
             frameCallbackNoScale = std::move(cb);
         }
-        void setFrameCallback(std::function<void(cv::Mat&)> cb)
+        void setFrameCallback(std::function<void(const cv::Mat&)> cb)
         {
             frameCallback = std::move(cb);
         }
@@ -64,9 +72,8 @@ namespace lepton {
         bool GPIO_GetVsync() ;
 
         void GPIO_DebugSet(bool high);
-
     private:
-        void processDataSegments(const std::vector<std::pair<const uint8_t*, size_t>>& segments);
+
         // config
         int m_gpioVsync = 0;
         int m_gpioDebug = 0;
@@ -86,17 +93,15 @@ namespace lepton {
         struct gpiod_line *dbg_line = nullptr;
 
         // capture/frame handling
-        std::function<void(cv::Mat&)> frameCallback;
-        std::function<void(cv::Mat&)> frameCallbackNoScale;
+        std::function<void(const cv::Mat&)> frameCallback;
+        std::function<void(const cv::Mat&)> frameCallbackNoScale;
         std::function<void(std::vector<uint8_t>&)> frameRawData;
 
         // internal threads and coordination
         std::atomic<bool> m_running{false};
 
         // segment buffers (4 segments)
-        static constexpr size_t VOSPI_FRAME_SIZE = 164;
-        static constexpr size_t BUFFER_VOSPI_FRAMES = 100;
-        static constexpr size_t LEP_SPI_BUFFER = VOSPI_FRAME_SIZE * BUFFER_VOSPI_FRAMES;
+
         using SegmentData = std::array<uint8_t, LEP_SPI_BUFFER>;
         std::array<SegmentData, 4> segments{};
         int segmentCount = 0;

@@ -75,14 +75,14 @@ int main()
         frameNo++;
     };
 
-    const auto funImgRaw = [&](cv::Mat& img) {
+    const auto funImgRaw = [&](const cv::Mat& img) {
         char data[128];
         snprintf(data, sizeof(data), "frame%04d.png", frameNo);
         cv::imwrite(data, img);
     };
 
 
-    const auto fun = [&](cv::Mat& img) {
+    const auto fun = [&](const cv::Mat& img) {
         cv::imshow("Foo", img);
         cv::waitKey(1);
         writer.write(img);

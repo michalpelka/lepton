@@ -26,6 +26,7 @@
 #include <sched.h>
 #include <cstring>
 #include <cerrno>
+#include <deque>
 
 namespace lepton {
     Lepton::Lepton() {
@@ -123,6 +124,76 @@ namespace lepton {
         if (dbg_line) gpiod_line_set_value(dbg_line, high ? 1 : 0);
     }
 
+    cv::Mat Lepton::processDataSegmentsToMatU16(const std::vector<std::vector<uint8_t>>& segmentsToProcess) {
+        unsigned int lepton_image[240][80];
+        // initialize image to zero to avoid uninitialized pixels
+        for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
+        for (int segmentId = 0; segmentId < segmentsToProcess.size(); segmentId++) {
+            const auto& segmentVec = segmentsToProcess[segmentId];
+            const auto segmentPtr = segmentsToProcess[segmentId].data();
+
+            // get package 20
+            const auto *packetPtr = segmentPtr + 20 * Lepton::VOSPI_FRAME_SIZE;
+            const auto header = VoISP::packet_id(packetPtr);
+            const auto segmentId2 = VoISP::getSegmentNumber(header);
+            if (!segmentId2.has_value() || segmentId2.value() != segmentId + 1) {
+                // segment number mismatch
+                std::cerr << "Segment number mismatch: expected " << (segmentId + 1)
+                          << " got " << (segmentId2.has_value() ? std::to_string(segmentId2.value()) : "none")
+                          << std::endl;
+                continue;
+            }
+            const size_t packetsInSegment = segmentsToProcess[segmentId].size() / Lepton::VOSPI_FRAME_SIZE;
+            if (packetsInSegment< BUFFER_VOSPI_FRAMES_MIN) {
+                std::cerr << "Segment too small: expected at least " << BUFFER_VOSPI_FRAMES_MIN << " packets, got " << packetsInSegment << std::endl;
+                continue;
+            }
+            for (int rowInSegment = 0; rowInSegment < packetsInSegment; rowInSegment++) {
+                const auto *packetPtr = segmentPtr + rowInSegment * Lepton::VOSPI_FRAME_SIZE;
+                // check if discard
+                bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
+                if (isDiscard) {
+                    continue;
+                }
+                const auto crcA = VoISP::packet_crc(packetPtr);
+                const auto crcC = VoISP::computeCRC(packetPtr, Lepton::VOSPI_FRAME_SIZE);
+                bool isCRCValid = (crcA == crcC);
+                if (!isCRCValid) {
+                    std::cerr << "CRC mismatch at segment " << segmentId << ", packet " << rowInSegment << std::endl;
+                    continue;
+                }
+                const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
+                if (packetNo >= 60) continue; // ignore out-of-range packet numbers
+                const int row = static_cast<int>(packetNo) + 60 * segmentId;
+                if (row < 0 || row >= 240) continue;
+                const auto lineData = VoISP::GetImageLine(packetPtr);
+                for (int col = 0; col < 80; col++) {
+                    lepton_image[row][col] = lineData[col];
+                }
+            }
+        }
+
+
+        const int pgm_w = 160;
+        const int pgm_h = 120;
+        cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
+        static int count = 0;
+        count++;
+        std::string filename = "pgm_img_" + std::to_string(count) + ".png";
+        cv::imwrite(filename, pgm_img);
+
+        for (int i = 0; i < 240; i += 2) {
+            int out_row = i / 2; // 0..119
+            for (int j = 0; j < 80; ++j) {
+                // left half (0..79) comes from row i
+                pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
+                // right half (80..159) comes from row i+1
+                pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
+            }
+        }
+        return pgm_img;
+    }
+
     void Lepton::capture() {
         if (m_running) return;
         m_running = true;
@@ -133,8 +204,7 @@ namespace lepton {
         int state = 0; //set to 1 when a valid segment is found
         int pixel = 0;
 
-        const size_t VOSPI_FRAME_SIZE(164);
-        const size_t BUFFER_VOSPI_FRAMES = 75;
+
         const size_t LEP_SPI_BUFFER = VOSPI_FRAME_SIZE * BUFFER_VOSPI_FRAMES;
 
         uint8_t rx_buf[LEP_SPI_BUFFER];
@@ -159,77 +229,29 @@ namespace lepton {
 
         m_savenetThread = std::thread([&]() {
             for (;m_running;) {
-                std::array<SegmentData, 4> segmentsCopy{}; {
+                std::vector<std::vector<uint8_t>> segmentsToProcess;
+                {
                     std::unique_lock<std::mutex> lk(segmentsMtx);
                     segmentCv.wait(lk, [&]() {
                         return segmentCount == 4;
                     });
+                   for (const auto &segmentData : segments) {
+                        segmentsToProcess.emplace_back(segmentData.begin(), segmentData.end());
+                    }
 
-                    std::swap(segmentsCopy, segments);
+                    // std::swap(segmentsCopy, segments);
                     segmentCount = 0;
                 }
 
                 if (frameRawData) {
                     std::vector<uint8_t> rawData;
-                    for (const auto &segmentData : segmentsCopy) {
+                    for (const auto &segmentData : segmentsToProcess) {
                         rawData.insert(rawData.end(), segmentData.begin(), segmentData.end());
                     }
                     frameRawData(rawData);
                 }
-                unsigned int lepton_image[240][80];
-                // initialize image to zero to avoid uninitialized pixels
-                for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
-                for (int segmentId = 0; segmentId < segmentsCopy.size(); segmentId++) {
-                    const auto &segmentData = segmentsCopy[segmentId];
 
-                    // get package 20
-                    const auto *packetPtr = segmentData.data() + 20 * VOSPI_FRAME_SIZE;
-                    const auto header = VoISP::packet_id(packetPtr);
-                    const auto segmentId2 = VoISP::getSegmentNumber(header);
-                    if (!segmentId2.has_value() || segmentId2.value() != segmentId + 1) {
-                        // segment number mismatch
-                        std::cerr << "Segment number mismatch: expected " << (segmentId + 1)
-                                  << " got " << (segmentId2.has_value() ? std::to_string(segmentId2.value()) : "none")
-                                  << std::endl;
-                        continue;
-                    }
-
-                    for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
-                        const auto *packetPtr = segmentData.data() + rowInSegment * VOSPI_FRAME_SIZE;
-                        // check if discard
-                        bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
-                        if (isDiscard) {
-                            continue;
-                        }
-                        const auto crcA = VoISP::packet_crc(packetPtr);
-                        const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
-                        bool isCRCValid = (crcA == crcC);
-
-                        const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
-                        if (packetNo >= 60) continue; // ignore out-of-range packet numbers
-                        const int row = static_cast<int>(packetNo) + 60 * segmentId;
-                        if (row < 0 || row >= 240) continue;
-                        const auto lineData = VoISP::GetImageLine(packetPtr);
-                        for (int col = 0; col < 80; col++) {
-                            lepton_image[row][col] = lineData[col];
-                        }
-                    }
-                }
-
-
-                const int pgm_w = 160;
-                const int pgm_h = 120;
-                cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
-
-                for (int i = 0; i < 240; i += 2) {
-                    int out_row = i / 2; // 0..119
-                    for (int j = 0; j < 80; ++j) {
-                        // left half (0..79) comes from row i
-                        pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
-                        // right half (80..159) comes from row i+1
-                        pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
-                    }
-                }
+                const auto pgm_img = processDataSegmentsToMatU16(segmentsToProcess);
 
                 if (frameCallbackNoScale) {
                     frameCallbackNoScale(pgm_img);
@@ -252,6 +274,160 @@ namespace lepton {
                 if (frameCallback) {
                     frameCallback(display_8u);
                 }
+
+                // unsigned int lepton_image[240][80];
+                // // initialize image to zero to avoid uninitialized pixels
+                // for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
+                // for (int segmentId = 0; segmentId < segmentsToProcess.size(); segmentId++) {
+                //     const auto segmentPtr = segmentsToProcess[segmentId].data();
+                //
+                //     // get package 20
+                //     const auto *packetPtr = segmentPtr + 20 * VOSPI_FRAME_SIZE;
+                //     const auto header = VoISP::packet_id(packetPtr);
+                //     const auto segmentId2 = VoISP::getSegmentNumber(header);
+                //     if (!segmentId2.has_value() || segmentId2.value() != segmentId + 1) {
+                //         // segment number mismatch
+                //         std::cerr << "Segment number mismatch: expected " << (segmentId + 1)
+                //                   << " got " << (segmentId2.has_value() ? std::to_string(segmentId2.value()) : "none")
+                //                   << std::endl;
+                //         continue;
+                //     }
+                //
+                //     for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
+                //         const auto *packetPtr = segmentPtr + rowInSegment * VOSPI_FRAME_SIZE;
+                //         // check if discard
+                //         bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
+                //         if (isDiscard) {
+                //             continue;
+                //         }
+                //         const auto crcA = VoISP::packet_crc(packetPtr);
+                //         const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
+                //         bool isCRCValid = (crcA == crcC);
+                //
+                //         const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
+                //         if (packetNo >= 60) continue; // ignore out-of-range packet numbers
+                //         const int row = static_cast<int>(packetNo) + 60 * segmentId;
+                //         if (row < 0 || row >= 240) continue;
+                //         const auto lineData = VoISP::GetImageLine(packetPtr);
+                //         for (int col = 0; col < 80; col++) {
+                //             lepton_image[row][col] = lineData[col];
+                //         }
+                //     }
+                // }
+                //
+                //
+                // const int pgm_w = 160;
+                // const int pgm_h = 120;
+                // cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
+                //
+                // for (int i = 0; i < 240; i += 2) {
+                //     int out_row = i / 2; // 0..119
+                //     for (int j = 0; j < 80; ++j) {
+                //         // left half (0..79) comes from row i
+                //         pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
+                //         // right half (80..159) comes from row i+1
+                //         pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
+                //     }
+                // }
+                //
+                // if (frameCallbackNoScale) {
+                //     frameCallbackNoScale(pgm_img);
+                // }
+                //
+                // // Convert to 8-bit for display, scale using min/max like save_pgm_file does
+                // uint16_t minv = UINT16_MAX, maxv = 0;
+                // for (int r = 0; r < pgm_img.rows; ++r) {
+                //     for (int c = 0; c < pgm_img.cols; ++c) {
+                //         uint16_t v = pgm_img.at<uint16_t>(r, c);
+                //         if (v > maxv) maxv = v;
+                //         if (v < minv) minv = v;
+                //     }
+                // }
+                // if (minv == maxv) maxv = minv + 1;
+                //
+                // cv::Mat display_8u;
+                // // scale to 0..255
+                // pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), -(minv * 255.0 / (maxv - minv)));
+                // if (frameCallback) {
+                //     frameCallback(display_8u);
+                // }
+
+                // unsigned int lepton_image[240][80];
+                // // initialize image to zero to avoid uninitialized pixels
+                // for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
+                // for (int segmentId = 0; segmentId < segmentsToProcess.size(); segmentId++) {
+                //     const auto segmentPtr = segmentsToProcess[segmentId].first;
+                //
+                //     // get package 20
+                //     const auto *packetPtr = segmentPtr + 20 * VOSPI_FRAME_SIZE;
+                //     const auto header = VoISP::packet_id(packetPtr);
+                //     const auto segmentId2 = VoISP::getSegmentNumber(header);
+                //     if (!segmentId2.has_value() || segmentId2.value() != segmentId + 1) {
+                //         // segment number mismatch
+                //         std::cerr << "Segment number mismatch: expected " << (segmentId + 1)
+                //                   << " got " << (segmentId2.has_value() ? std::to_string(segmentId2.value()) : "none")
+                //                   << std::endl;
+                //         continue;
+                //     }
+                //
+                //     for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
+                //         const auto *packetPtr = segmentPtr + rowInSegment * VOSPI_FRAME_SIZE;
+                //         // check if discard
+                //         bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
+                //         if (isDiscard) {
+                //             continue;
+                //         }
+                //         const auto crcA = VoISP::packet_crc(packetPtr);
+                //         const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
+                //         bool isCRCValid = (crcA == crcC);
+                //
+                //         const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
+                //         if (packetNo >= 60) continue; // ignore out-of-range packet numbers
+                //         const int row = static_cast<int>(packetNo) + 60 * segmentId;
+                //         if (row < 0 || row >= 240) continue;
+                //         const auto lineData = VoISP::GetImageLine(packetPtr);
+                //         for (int col = 0; col < 80; col++) {
+                //             lepton_image[row][col] = lineData[col];
+                //         }
+                //     }
+                // }
+                //
+                //
+                // const int pgm_w = 160;
+                // const int pgm_h = 120;
+                // cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
+                //
+                // for (int i = 0; i < 240; i += 2) {
+                //     int out_row = i / 2; // 0..119
+                //     for (int j = 0; j < 80; ++j) {
+                //         // left half (0..79) comes from row i
+                //         pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
+                //         // right half (80..159) comes from row i+1
+                //         pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
+                //     }
+                // }
+                //
+                // if (frameCallbackNoScale) {
+                //     frameCallbackNoScale(pgm_img);
+                // }
+                //
+                // // Convert to 8-bit for display, scale using min/max like save_pgm_file does
+                // uint16_t minv = UINT16_MAX, maxv = 0;
+                // for (int r = 0; r < pgm_img.rows; ++r) {
+                //     for (int c = 0; c < pgm_img.cols; ++c) {
+                //         uint16_t v = pgm_img.at<uint16_t>(r, c);
+                //         if (v > maxv) maxv = v;
+                //         if (v < minv) minv = v;
+                //     }
+                // }
+                // if (minv == maxv) maxv = minv + 1;
+                //
+                // cv::Mat display_8u;
+                // // scale to 0..255
+                // pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), -(minv * 255.0 / (maxv - minv)));
+                // if (frameCallback) {
+                //     frameCallback(display_8u);
+                // }
             }
         });
 
