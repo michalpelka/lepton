@@ -124,7 +124,7 @@ namespace lepton {
         if (dbg_line) gpiod_line_set_value(dbg_line, high ? 1 : 0);
     }
 
-    cv::Mat Lepton::processDataSegmentsToMatU16(const std::vector<std::vector<uint8_t>>& segmentsToProcess) {
+    cv::Mat Lepton::ProcessDataSegmentsToMatU16(const std::vector<std::span<const uint8_t>>& segmentsToProcess) {
         unsigned int lepton_image[240][80];
         // initialize image to zero to avoid uninitialized pixels
         for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
@@ -194,6 +194,24 @@ namespace lepton {
         return pgm_img;
     }
 
+    cv::Mat Lepton::ScaleToU8(const cv::Mat& pgm_img) {
+        // Convert to 8-bit for display, scale using min/max like save_pgm_file does
+        uint16_t minv = UINT16_MAX, maxv = 0;
+        for (int r = 0; r < pgm_img.rows; ++r) {
+            for (int c = 0; c < pgm_img.cols; ++c) {
+                uint16_t v = pgm_img.at<uint16_t>(r, c);
+                if (v > maxv) maxv = v;
+                if (v < minv) minv = v;
+            }
+        }
+        if (minv == maxv) maxv = minv + 1;
+
+        cv::Mat display_8u;
+        // scale to 0..255
+        pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), -(minv * 255.0 / (maxv - minv)));
+        return display_8u;
+    }
+
     void Lepton::capture() {
         if (m_running) return;
         m_running = true;
@@ -229,205 +247,39 @@ namespace lepton {
 
         m_savenetThread = std::thread([&]() {
             for (;m_running;) {
-                std::vector<std::vector<uint8_t>> segmentsToProcess;
+                std::array<SegmentData, 4> segmentsThreadLocal;
                 {
                     std::unique_lock<std::mutex> lk(segmentsMtx);
                     segmentCv.wait(lk, [&]() {
                         return segmentCount == 4;
                     });
-                   for (const auto &segmentData : segments) {
-                        segmentsToProcess.emplace_back(segmentData.begin(), segmentData.end());
-                    }
 
-                    // std::swap(segmentsCopy, segments);
+                    std::swap(segmentsThreadLocal, segments);
                     segmentCount = 0;
                 }
 
                 if (frameRawData) {
                     std::vector<uint8_t> rawData;
-                    for (const auto &segmentData : segmentsToProcess) {
+                    for (const auto &segmentData : segmentsThreadLocal) {
                         rawData.insert(rawData.end(), segmentData.begin(), segmentData.end());
                     }
                     frameRawData(rawData);
                 }
-
-                const auto pgm_img = processDataSegmentsToMatU16(segmentsToProcess);
+                std::vector<std::span<const uint8_t>> spans;
+                for (const auto &segmentData : segmentsThreadLocal) {
+                    spans.emplace_back(segmentData.data(), segmentData.size());
+                }
+                const auto pgm_img = ProcessDataSegmentsToMatU16(spans);
 
                 if (frameCallbackNoScale) {
                     frameCallbackNoScale(pgm_img);
                 }
 
-                // Convert to 8-bit for display, scale using min/max like save_pgm_file does
-                uint16_t minv = UINT16_MAX, maxv = 0;
-                for (int r = 0; r < pgm_img.rows; ++r) {
-                    for (int c = 0; c < pgm_img.cols; ++c) {
-                        uint16_t v = pgm_img.at<uint16_t>(r, c);
-                        if (v > maxv) maxv = v;
-                        if (v < minv) minv = v;
-                    }
-                }
-                if (minv == maxv) maxv = minv + 1;
-
-                cv::Mat display_8u;
-                // scale to 0..255
-                pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), -(minv * 255.0 / (maxv - minv)));
                 if (frameCallback) {
+                    const auto display_8u = ScaleToU8(pgm_img);
                     frameCallback(display_8u);
                 }
 
-                // unsigned int lepton_image[240][80];
-                // // initialize image to zero to avoid uninitialized pixels
-                // for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
-                // for (int segmentId = 0; segmentId < segmentsToProcess.size(); segmentId++) {
-                //     const auto segmentPtr = segmentsToProcess[segmentId].data();
-                //
-                //     // get package 20
-                //     const auto *packetPtr = segmentPtr + 20 * VOSPI_FRAME_SIZE;
-                //     const auto header = VoISP::packet_id(packetPtr);
-                //     const auto segmentId2 = VoISP::getSegmentNumber(header);
-                //     if (!segmentId2.has_value() || segmentId2.value() != segmentId + 1) {
-                //         // segment number mismatch
-                //         std::cerr << "Segment number mismatch: expected " << (segmentId + 1)
-                //                   << " got " << (segmentId2.has_value() ? std::to_string(segmentId2.value()) : "none")
-                //                   << std::endl;
-                //         continue;
-                //     }
-                //
-                //     for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
-                //         const auto *packetPtr = segmentPtr + rowInSegment * VOSPI_FRAME_SIZE;
-                //         // check if discard
-                //         bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
-                //         if (isDiscard) {
-                //             continue;
-                //         }
-                //         const auto crcA = VoISP::packet_crc(packetPtr);
-                //         const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
-                //         bool isCRCValid = (crcA == crcC);
-                //
-                //         const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
-                //         if (packetNo >= 60) continue; // ignore out-of-range packet numbers
-                //         const int row = static_cast<int>(packetNo) + 60 * segmentId;
-                //         if (row < 0 || row >= 240) continue;
-                //         const auto lineData = VoISP::GetImageLine(packetPtr);
-                //         for (int col = 0; col < 80; col++) {
-                //             lepton_image[row][col] = lineData[col];
-                //         }
-                //     }
-                // }
-                //
-                //
-                // const int pgm_w = 160;
-                // const int pgm_h = 120;
-                // cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
-                //
-                // for (int i = 0; i < 240; i += 2) {
-                //     int out_row = i / 2; // 0..119
-                //     for (int j = 0; j < 80; ++j) {
-                //         // left half (0..79) comes from row i
-                //         pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
-                //         // right half (80..159) comes from row i+1
-                //         pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
-                //     }
-                // }
-                //
-                // if (frameCallbackNoScale) {
-                //     frameCallbackNoScale(pgm_img);
-                // }
-                //
-                // // Convert to 8-bit for display, scale using min/max like save_pgm_file does
-                // uint16_t minv = UINT16_MAX, maxv = 0;
-                // for (int r = 0; r < pgm_img.rows; ++r) {
-                //     for (int c = 0; c < pgm_img.cols; ++c) {
-                //         uint16_t v = pgm_img.at<uint16_t>(r, c);
-                //         if (v > maxv) maxv = v;
-                //         if (v < minv) minv = v;
-                //     }
-                // }
-                // if (minv == maxv) maxv = minv + 1;
-                //
-                // cv::Mat display_8u;
-                // // scale to 0..255
-                // pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), -(minv * 255.0 / (maxv - minv)));
-                // if (frameCallback) {
-                //     frameCallback(display_8u);
-                // }
-
-                // unsigned int lepton_image[240][80];
-                // // initialize image to zero to avoid uninitialized pixels
-                // for (int r = 0; r < 240; ++r) for (int c = 0; c < 80; ++c) lepton_image[r][c] = 0;
-                // for (int segmentId = 0; segmentId < segmentsToProcess.size(); segmentId++) {
-                //     const auto segmentPtr = segmentsToProcess[segmentId].first;
-                //
-                //     // get package 20
-                //     const auto *packetPtr = segmentPtr + 20 * VOSPI_FRAME_SIZE;
-                //     const auto header = VoISP::packet_id(packetPtr);
-                //     const auto segmentId2 = VoISP::getSegmentNumber(header);
-                //     if (!segmentId2.has_value() || segmentId2.value() != segmentId + 1) {
-                //         // segment number mismatch
-                //         std::cerr << "Segment number mismatch: expected " << (segmentId + 1)
-                //                   << " got " << (segmentId2.has_value() ? std::to_string(segmentId2.value()) : "none")
-                //                   << std::endl;
-                //         continue;
-                //     }
-                //
-                //     for (int rowInSegment = 0; rowInSegment < BUFFER_VOSPI_FRAMES; rowInSegment++) {
-                //         const auto *packetPtr = segmentPtr + rowInSegment * VOSPI_FRAME_SIZE;
-                //         // check if discard
-                //         bool isDiscard = VoISP::is_discard_packet(VoISP::packet_id(packetPtr));
-                //         if (isDiscard) {
-                //             continue;
-                //         }
-                //         const auto crcA = VoISP::packet_crc(packetPtr);
-                //         const auto crcC = VoISP::computeCRC(packetPtr, VOSPI_FRAME_SIZE);
-                //         bool isCRCValid = (crcA == crcC);
-                //
-                //         const auto packetNo = VoISP::getPacketNumber(VoISP::packet_id(packetPtr));
-                //         if (packetNo >= 60) continue; // ignore out-of-range packet numbers
-                //         const int row = static_cast<int>(packetNo) + 60 * segmentId;
-                //         if (row < 0 || row >= 240) continue;
-                //         const auto lineData = VoISP::GetImageLine(packetPtr);
-                //         for (int col = 0; col < 80; col++) {
-                //             lepton_image[row][col] = lineData[col];
-                //         }
-                //     }
-                // }
-                //
-                //
-                // const int pgm_w = 160;
-                // const int pgm_h = 120;
-                // cv::Mat pgm_img(pgm_h, pgm_w, CV_16UC1);
-                //
-                // for (int i = 0; i < 240; i += 2) {
-                //     int out_row = i / 2; // 0..119
-                //     for (int j = 0; j < 80; ++j) {
-                //         // left half (0..79) comes from row i
-                //         pgm_img.at<uint16_t>(out_row, j) = static_cast<uint16_t>(lepton_image[i][j]);
-                //         // right half (80..159) comes from row i+1
-                //         pgm_img.at<uint16_t>(out_row, j + 80) = static_cast<uint16_t>(lepton_image[i + 1][j]);
-                //     }
-                // }
-                //
-                // if (frameCallbackNoScale) {
-                //     frameCallbackNoScale(pgm_img);
-                // }
-                //
-                // // Convert to 8-bit for display, scale using min/max like save_pgm_file does
-                // uint16_t minv = UINT16_MAX, maxv = 0;
-                // for (int r = 0; r < pgm_img.rows; ++r) {
-                //     for (int c = 0; c < pgm_img.cols; ++c) {
-                //         uint16_t v = pgm_img.at<uint16_t>(r, c);
-                //         if (v > maxv) maxv = v;
-                //         if (v < minv) minv = v;
-                //     }
-                // }
-                // if (minv == maxv) maxv = minv + 1;
-                //
-                // cv::Mat display_8u;
-                // // scale to 0..255
-                // pgm_img.convertTo(display_8u, CV_8U, 255.0 / (maxv - minv), -(minv * 255.0 / (maxv - minv)));
-                // if (frameCallback) {
-                //     frameCallback(display_8u);
-                // }
             }
         });
 

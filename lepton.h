@@ -34,8 +34,8 @@ namespace lepton {
         static constexpr size_t BUFFER_VOSPI_FRAMES = 75;
 
         static constexpr size_t LEP_SPI_BUFFER = VOSPI_FRAME_SIZE * BUFFER_VOSPI_FRAMES;
-        static cv::Mat processDataSegmentsToMatU16(const std::vector<std::vector<uint8_t>>& segmentsToProcess);
-
+        static cv::Mat ProcessDataSegmentsToMatU16(const std::vector<std::span<const uint8_t>>& segmentsToProcess);
+        static cv::Mat ScaleToU8(const cv::Mat& mat);
         Lepton();
         ~Lepton();
 
