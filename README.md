@@ -219,6 +219,18 @@ For optimal frame capture performance, the library supports real-time scheduling
 - Verify SPI is enabled: `ls /dev/spi*`
 - Check SPI permissions: `sudo chmod 666 /dev/spidev0.0`
 - Reduce SPI speed if experiencing data corruption
+- **Increase SPI buffer size** if experiencing buffer overruns:
+  ```bash
+  # Temporary (until reboot)
+  sudo sh -c 'echo 65536 > /sys/module/spidev/parameters/bufsiz'
+  
+  # Permanent - add to /boot/cmdline.txt or /boot/firmware/cmdline.txt
+  # Add: spidev.bufsiz=65536
+  
+  # Or create a kernel module parameter file
+  sudo sh -c 'echo "options spidev bufsiz=65536" > /etc/modprobe.d/spidev.conf'
+  sudo reboot
+  ```
 
 ### I2C Communication Issues
 - Verify I2C is enabled: `ls /dev/i2c*`
