@@ -4,7 +4,7 @@ A C++ library for interfacing with FLIR Lepton thermal imaging cameras on Raspbe
 
 ## Overview
 
-This library provides a high-level C++ interface for controlling and capturing thermal images from FLIR Lepton cameras. It handles VoSPI (Video over SPI) protocol communication, frame synchronization via GPIO, and camera configuration through I2C.
+This library provides a high-level C++ interface for controlling and capturing thermal images from FLIR Lepton 3.5 cameras. It handles VoSPI (Video over SPI) protocol communication, frame synchronization via GPIO, and camera configuration through I2C.
 
 ## Features
 
@@ -248,9 +248,11 @@ This project is provided without any license. All rights are reserved by the aut
 
 You may **not** use, copy, modify, merge, publish, distribute, sublicense, or sell any part of this software unless you obtain explicit written permission from the author.
 
-## Contributing
+Contact Author for license of this software.
 
-Please contact the author for contribution guidelines.
+
+## Contributing
+Due to no-license model no contributions will be accepted.
 
 ## Author
 
