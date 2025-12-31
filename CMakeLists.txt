@@ -44,3 +44,19 @@ add_executable(test_simple test.cpp)
 target_link_libraries(test_simple gtest_main)
 
 add_test(NAME simple_tests COMMAND test_simple)
+
+
+# Find LibSerial via pkg-config (optional)
+find_path(LIBSERIAL_INCLUDE_DIR SerialPort.h
+        PATH_SUFFIXES include
+        PATHS /usr /usr/local /usr/include/libserial)
+message(${LIBSERIAL_INCLUDE_DIR})
+find_library(LIBSERIAL_LIBRARY
+        NAMES libserial.so
+        PATH_SUFFIXES lib
+        PATHS /usr/lib)
+if (LIBSERIAL_LIBRARY)
+    add_executable(readCDC readCDC.cpp base64/base64.cpp)
+    include_directories(${LIBSERIAL_INCLUDE_DIR})
+    target_link_libraries(readCDC PRIVATE leptonLib ${LIBSERIAL_LIBRARY})
+endif()
