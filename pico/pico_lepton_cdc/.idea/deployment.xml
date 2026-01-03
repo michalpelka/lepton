@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" remoteFilesAllowedToDisappearOnAutoupload="false">
+    <serverData>
+      <paths name="Remote Host (1) (98a47d14-97fe-4cbd-a75d-cc3b97164587)">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$/../pico-sdk" web="/" />
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="Remote Host (83005522-8e7e-480d-a4d0-e38002a4b266)">
+        <serverdata>
+          <mappings>
+            <mapping local="$PROJECT_DIR$/../pico-sdk" web="/" />
+            <mapping local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+  </component>
+</project>

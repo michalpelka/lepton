@@ -15,10 +15,10 @@
 #include "fstream"
 #include "base64/base64.h"
 
+#include <algorithm>
 
 
-
-void processLines(const std::deque<std::string>& lines) {
+void processLinesB64(const std::deque<std::string>& lines) {
     std::vector<std::vector<uint8_t>> data;
     data.resize(4);
 
@@ -57,8 +57,38 @@ void processLines(const std::deque<std::string>& lines) {
     cv::Mat unscaled = lepton::Lepton::ProcessDataSegmentsToMatU16(spans);
     cv::Mat scaled = lepton::Lepton::ScaleToU8(unscaled);
     cv::imshow("Foo", scaled);
+    //cv::waitKey(0);
+
+
+}
+
+void processLinesBinary(const  std::vector<uint8_t> & blob) {
+
+    int segmentCountSize = blob.size()/4;
+
+
+
+    std::vector<std::span<const uint8_t>> spans;
+    for (int i = 0; i < 4; ++i) {
+        spans.emplace_back(blob.data() + i * segmentCountSize, segmentCountSize);
+    }
+
+    cv::Mat unscaled = lepton::Lepton::ProcessDataSegmentsToMatU16(spans);
+    cv::Mat scaled = lepton::Lepton::ScaleToU8(unscaled);
+    cv::imshow("Foo", scaled);
     cv::waitKey(1);
 
+}
+bool ends_with(const std::deque<uint8_t>& buffer,
+               const std::vector<uint8_t>& pattern)
+{
+    if (pattern.size() > buffer.size())
+        return false;
+
+    return std::equal(
+        pattern.rbegin(), pattern.rend(),
+        buffer.rbegin()
+    );
 }
 
 int main(int argc, char** argv)
@@ -79,30 +109,96 @@ int main(int argc, char** argv)
     std::deque<std::string> lines;
     int lastFrame = -1;
     auto lastFrameTs = std::chrono::high_resolution_clock::now();
+
+    std::deque<uint8_t> buffer;
+    const std::vector<uint8_t> headerStartBytes = {'L', 'E','P', 'T', 'O', 'N', ' '};
     for (;;) {
-        std::string line;
-        serial.ReadLine(line);
+        char c;
+        serial.ReadByte(c, 1000);
+        buffer.push_back(c);
 
-        int frameNo = 0;
-        std::stringstream ss(line);
-        ss >> frameNo;
-        if (frameNo > lastFrame && lastFrame != -1 && lines.size() >=240) {
-            std::cout << "Processing frame " << frameNo << std::endl;
-            processLines(lines);
+        if (ends_with(buffer, headerStartBytes))
+        {
+            // finish reading line
+            std::string line;
+            serial.ReadLine(line);
+            std::cout << "Found header " << line << std::endl;
 
-            auto now = std::chrono::high_resolution_clock::now();
-            std::chrono::duration<double> elapsed_seconds = now - lastFrameTs;
-            uint64_t bytes = 0;
-            for (const auto& line : lines) {
-                bytes += line.size();
+            int frameNo = 0;
+            int dataSize = 0;
+            std::string sizeWord;
+            std::stringstream ss(line);
+            ss >> frameNo;
+            ss >> dataSize;
+
+            std::vector<uint8_t> data;
+            serial.Read(data, dataSize, 1000);
+
+            std::cout << "Got frame " << frameNo << " size " << dataSize << "\n";
+
+
+
+            if (frameNo > lastFrame && lastFrame != -1 ) {
+                std::cout << "Processing frame " << frameNo << std::endl;
+
+                processLinesBinary(data);
+
+                auto now = std::chrono::high_resolution_clock::now();
+                std::chrono::duration<double> elapsed_seconds = now - lastFrameTs;
+                uint64_t bytes = 0;
+                bytes += dataSize + line.size();
+                double bps = double(bytes) / elapsed_seconds.count();
+                std::cout << "Elapsed time: " << elapsed_seconds.count() << "s kbps " << bps / 1024 << "\n";
+                lines.clear();
+                lastFrameTs = now;
             }
-            double bps = double(bytes) / elapsed_seconds.count();
-            std::cout << "Elapsed time: " << elapsed_seconds.count() << "s kbps " << bps / 1024 << "\n";
-            lines.clear();
-            lastFrameTs = now;
+            //lines.push_back(line);
+            lastFrame = frameNo;
+
+
         }
-        lines.push_back(line);
-        lastFrame = frameNo;
+        if (buffer.size() > 128) {
+            buffer.pop_front();
+        }
+        // std::string line;
+        //
+        // serial.ReadLine(line, 2);
+        // std::string tag, sizeWord;
+        //
+        // int frameNo = 0;
+        // std::stringstream ss(line);
+        // ss >> tag;
+        // ss >> frameNo;
+        // ss >> sizeWord;
+        // int dataSize = 0;
+        // ss >> dataSize;
+        // if (tag != "LEPTON" || sizeWord != "SIZE") {
+        //     std::cerr << "Bad header: " << line << "\n";
+        //     continue;
+        // }
+        // std::vector<uint8_t> data;
+        // serial.Read(data, dataSize, 1000);
+        //
+        // std::cout << "Got frame " << frameNo << " size " << dataSize << "\n";
+        //
+        //
+        //
+        // if (frameNo > lastFrame && lastFrame != -1 ) {
+        //     std::cout << "Processing frame " << frameNo << std::endl;
+        //
+        //     processLinesBinary(data);
+        //
+        //     auto now = std::chrono::high_resolution_clock::now();
+        //     std::chrono::duration<double> elapsed_seconds = now - lastFrameTs;
+        //     uint64_t bytes = 0;
+        //     bytes += dataSize + line.size();
+        //     double bps = double(bytes) / elapsed_seconds.count();
+        //     std::cout << "Elapsed time: " << elapsed_seconds.count() << "s kbps " << bps / 1024 << "\n";
+        //     lines.clear();
+        //     lastFrameTs = now;
+        // }
+        // //lines.push_back(line);
+        // lastFrame = frameNo;
 
 
 
