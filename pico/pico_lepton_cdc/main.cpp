@@ -30,6 +30,8 @@ LEP_CAMERA_PORT_DESC_T m_lepPort; //! i2c port for Lepton camera
 const uint GPIO_Vsync_PIN = 14;
 
 #define SPI_INSTANCE spi0
+
+#define LEPTON_ENABLE_TELEMETRY 1
 const uint GPIO_SPI_CS = 17;
 const uint GPIO_SPI_MOSI_TX = 19;
 const uint GPIO_SPI_MISO_RX = 16;
@@ -39,8 +41,8 @@ const uint GPIO_LEPTON_RST = 21;
 const uint GPIO_LEPTON_PWDN = 20;
 
 const size_t VOSPI_FRAME_SIZE(164);
-const size_t BUFFER_VOSPI_FRAMES_VALID = 60;
-const size_t BUFFER_VOSPI_FRAMES = 61;
+const size_t BUFFER_VOSPI_FRAMES_VALID = LEPTON_ENABLE_TELEMETRY ? 61 : 60;
+const size_t BUFFER_VOSPI_FRAMES = 62;
 const size_t LEP_SPI_BUFFER = VOSPI_FRAME_SIZE * BUFFER_VOSPI_FRAMES;
 const size_t VOSPI_FRAME_SIZE_B64 = VOSPI_FRAME_SIZE * 2; // base64 encoded size with some headroom
 const size_t CDC_HEADER_SIZE=128;
@@ -227,11 +229,11 @@ void WatchdogTask(void *pv) {
 
 void SPITask(void *pvParameters)
 {
-      watchdog_enable(4000, 1);
+      //watchdog_enable(4000, 1);
       static int32_t segmentCount = -1;
       bool frameReady = false;
       for (;;) {
-          watchdog_update();
+        //  watchdog_update();
         // Wait for VSYNC interrupt
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
         sleep_us(200);
@@ -276,7 +278,7 @@ void SPITask(void *pvParameters)
 
         }
 
-        if (numberOfPacketsOk == 60  && segment.has_value()) {
+        if (numberOfPacketsOk >= 60  && segment.has_value()) {
 
             if (segmentCount == -1 && segment.value() == 0) {
                 segmentCount = 0;
@@ -313,7 +315,6 @@ void SPITask(void *pvParameters)
 
     }
 }
-
 
 int main() {
 
@@ -368,9 +369,6 @@ int main() {
     gpio_put(GPIO_LEPTON_PWDN, true);
     sleep_ms(1000);
 
-    volatile int t1 = CFG_TUD_CDC_RX_BUFSIZE;
-    volatile int t2= CFG_TUD_CDC_EP_BUFSIZE;
-
     LEP_RESULT result = LEP_OpenPort(1, LEP_CCI_TWI, 400, &m_lepPort);
     CheckLepResult(result, "LEP_OpenPort");
 
@@ -409,6 +407,7 @@ int main() {
     CheckLepResult(result, "LEP_GetSysCameraUpTime");
     printf("uptime = %d ms \n", uptime);
 
+
     // set vsync mode
     result = LEP_SetOemGpioVsyncPhaseDelay(&m_lepPort, LEP_OEM_VSYNC_DELAY_NONE);
     CheckLepResult(result, "LEP_SetOemGpioVsyncPhaseDelay");
@@ -416,7 +415,20 @@ int main() {
     // set vsync mode
     result = LEP_SetOemGpioMode(&m_lepPort, LEP_OEM_GPIO_MODE_VSYNC);
     CheckLepResult(result, "LEP_SetOemGpioMode");
+
+    if (LEPTON_ENABLE_TELEMETRY) {
+        printf("Enabling telemetry\n");
+        // enable telemetry data
+        LEP_SYS_TELEMETRY_ENABLE_STATE_E telemetry_enable_state_e;
+        telemetry_enable_state_e = LEP_TELEMETRY_ENABLED;
+        result = LEP_SetSysTelemetryEnableState(&m_lepPort, telemetry_enable_state_e);
+        CheckLepResult(result, "LEP_SetSysTelemetryEnableState");
+    }
+
+
     stdio_deinit_all();
+
+
     // set gpio for ISR
     gpio_init(GPIO_Vsync_PIN);
     gpio_set_dir(GPIO_Vsync_PIN, GPIO_IN);
