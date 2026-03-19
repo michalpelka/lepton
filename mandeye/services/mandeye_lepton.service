@@ -1,0 +1,14 @@
+[Unit]
+Description=Mandeye Lepton thermal camera service
+After=multi-user.target
+
+[Service]
+User=pi
+StandardOutput=journal
+StandardError=journal
+ExecStartPre=/bin/sleep 20
+ExecStart=/opt/mandeye/extras/mandeye_lepton
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

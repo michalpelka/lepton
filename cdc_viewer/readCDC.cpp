@@ -13,8 +13,6 @@
 #include <cstring>
 #include "lepton.h"
 #include "fstream"
-#include "base64/base64.h"
-
 #include <algorithm>
 
 
