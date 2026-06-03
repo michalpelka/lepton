@@ -1,264 +1,151 @@
-# Lepton Thermal Camera Library
+# Mandeye Internal Lepton
 
-A C++ library for interfacing with FLIR Lepton thermal imaging cameras on Raspberry Pi using SPI, I2C, and GPIO.
+Mandeye integration for FLIR Lepton thermal cameras connected via Raspberry Pi Pico over USB-CDC.
+Captures and saves thermal frames during active scans, with one output directory per device.
 
-## Overview
+## How it works
 
-This library provides a high-level C++ interface for controlling and capturing thermal images from FLIR Lepton 3.5 cameras. It handles VoSPI (Video over SPI) protocol communication, frame synchronization via GPIO, and camera configuration through I2C.
+1. Auto-discovers connected Raspberry Pi Pico devices (or uses `--device` arguments).
+2. Subscribes to the Mandeye ZeroMQ status socket.
+3. While mode is `SCANNING`, each Pico thread captures frames and saves them to:
+   ```
+   <continuousScanTarget>/LEPTON_<simplifiedPicoName>/<timestamp_ns>.png
+   <continuousScanTarget>/LEPTON_<simplifiedPicoName>/<timestamp_ns>_visual.png
+   <continuousScanTarget>/LEPTON_<simplifiedPicoName>/<timestamp_ns>.meta.json
+   ```
+4. Saves at most `--fps` frames per second per device (default: 5).
 
-## Features
+### Output files per frame
 
-- **SPI Communication**: High-speed video data acquisition via SPI interface
-- **I2C Control**: Camera configuration and control using the Lepton SDK
-- **GPIO Integration**: VSYNC and debug signal handling using libgpiod
-- **Frame Processing**: VoSPI packet parsing and frame assembly
-- **OpenCV Integration**: Direct output to OpenCV Mat format for display and processing
-- **Multi-threaded Design**: Separate threads for capture and processing
-- **Raw Data Access**: Support for raw frame data callbacks
+| File | Description |
+|------|-------------|
+| `<ts>.png` | 16-bit grayscale PNG — raw radiometric values (CV_16UC1) |
+| `<ts>_visual.png` | 8-bit JET colormap PNG — for quick visual inspection |
+| `<ts>.meta.json` | Metadata: timestamp, device, resolution, FPA/housing temperature, frame counter |
 
 ## Hardware Requirements
 
-- Raspberry Pi (any model with SPI support)
-- FLIR Lepton thermal camera module (tested with Lepton 3.5)
-- Proper electrical connections:
-  - SPI (MISO, MOSI, SCLK, CS)
-  - I2C (SDA, SCL)
-  - GPIO for VSYNC (default: GPIO 21)
-  - GPIO for debug (default: GPIO 20)
+- Raspberry Pi with USB port
+- FLIR Lepton 3.5 camera module on a Raspberry Pi Pico breakout board
+- The Pico must run the Lepton CDC firmware (presents as a USB serial/CDC device)
 
 ## Software Dependencies
 
-### System Libraries
-- **libgpiod** - GPIO device library
-  ```bash
-  sudo apt install libgpiod-dev
-  ```
+```bash
+sudo apt install libopencv-dev libgpiod-dev libserial-dev
+```
 
-- **OpenCV** - Computer vision library (version 4.x recommended)
-  ```bash
-  sudo apt install libopencv-dev
-  ```
+`libserial-dev` is required for `cdc_viewer/readCDC`. If it is not available, `cdc_viewer` and `mandeye` are skipped automatically by CMake.
 
-### Build Tools
-- CMake (version 3.20 or higher)
-- C++20 compatible compiler (GCC 10+ or Clang 11+)
+- CMake 3.20+, C++20 compiler
+- `nlohmann/json` — bundled
+- Google Test — fetched automatically via CMake FetchContent
 
-### Included Dependencies
-- **Google Test** - Automatically fetched via CMake FetchContent
-- **Lepton SDK** - Included in `leptonSDKEmb32PUB` subdirectory
+## Build
 
-## Building
+Built as part of the main CMake tree. Binary output: `mandeye_lepton`.
 
 ```bash
-# Clone the repository
-git clone https://github.com/michalpelka/lepton.git
-cd lepton
-
-# Create build directory
-mkdir build
-cd build
-
-# Configure and build
-cmake ..
-make
-
-# Run tests (optional)
-ctest
+cmake -B build -S extras/internal_lepton
+cmake --build build --target mandeye_lepton
 ```
 
 ## Usage
 
-### Basic Example
+```
+mandeye_lepton [--device <path>] [--fps <n>] [--list]
 
-```cpp
-#include "lepton.h"
-
-int main() {
-    lepton::Lepton cam;
-    
-    // Initialize GPIO (chip name, VSYNC pin, debug pin)
-    if (!cam.initGpio("gpiochip0", 21, 20)) {
-        std::cerr << "Failed to init GPIO" << std::endl;
-        return 1;
-    }
-    
-    // Start SPI communication
-    if (!cam.startSpi("/dev/spidev0.0", 25000000)) {
-        std::cerr << "Failed to start SPI" << std::endl;
-        return 1;
-    }
-    
-    // Start I2C communication
-    if (!cam.startI2c()) {
-        std::cerr << "Failed to start I2C" << std::endl;
-        return 1;
-    }
-    
-    // Configure camera GPIO
-    if (!cam.configureOemGpio()) {
-        std::cerr << "Failed to configure OEM GPIO" << std::endl;
-        return 1;
-    }
-    
-    // Set frame callback
-    cam.setFrameCallback([](cv::Mat& img) {
-        cv::imshow("Thermal Image", img);
-        cv::waitKey(1);
-    });
-    
-    // Start capturing
-    cam.capture();
-    
-    // Keep running
-    std::this_thread::sleep_for(std::chrono::minutes(1));
-    
-    // Clean shutdown
-    cam.shutdown();
-    return 0;
-}
+  --device <path>   Add a specific CDC device (repeatable for multiple cameras)
+  --fps <n>         Max frames per second to save per device (default: 5.0)
+  --list            List detected Raspberry Pi Pico devices and exit
 ```
 
-### Available Callbacks
+If no `--device` is given, all connected Picos are auto-discovered.
 
-The library provides three types of callbacks:
-
-1. **Frame Callback** (scaled image):
-   ```cpp
-   cam.setFrameCallback([](cv::Mat& img) {
-       // Process scaled thermal image
-   });
-   ```
-
-2. **Frame Without Scale Callback** (raw thermal values):
-   ```cpp
-   cam.setFrameWithoutScale([](cv::Mat& img) {
-       // Process raw thermal values
-   });
-   ```
-
-3. **Raw Frame Data Callback**:
-   ```cpp
-   cam.setRawFrameCallback([](std::vector<uint8_t>& data) {
-       // Process raw VoSPI data
-   });
-   ```
-
-## Examples
-
-The repository includes several example applications:
-
-- **testLeptonApp** - Live camera capture with display (requires hardware)
-- **readRawLepton** - Raw data reading utility
-
-Build and run examples:
-```bash
-cd build
-./testLeptonApp      # Live capture (requires hardware)
-```
-
-Note: `testLeptonFile` is currently not built as it requires an unimplemented function.
-
-## VoSPI Protocol
-
-The library implements the VoSPI (Video over SPI) protocol for Lepton cameras:
-- Handles 4-segment telemetry frames
-- CRC validation for packet integrity
-- Automatic resynchronization on packet loss
-- Segment assembly and frame reconstruction
-
-## Testing
-
-The project includes unit tests using Google Test:
+### Examples
 
 ```bash
-cd build
-./test_simple
+# Auto-discover all Picos, default 5 fps
+mandeye_lepton
+
+# Explicit device, 8 fps
+mandeye_lepton --device /dev/ttyACM0 --fps 8
+
+# Discover and list available devices
+mandeye_lepton --list
 ```
 
-Tests cover:
-- VoSPI packet parsing
-- CRC validation
-- Segment and packet number extraction
-- Discard packet detection
+## Install and start the service
 
-## SPI Configuration
-
-Default SPI settings:
-- Speed: 25 MHz
-- Mode: CPOL | CPHA
-- Bits per word: 8
-- Device: `/dev/spidev0.0`
-
-## GPIO Configuration
-
-Default GPIO pins (BCM numbering):
-- VSYNC: GPIO 21
-- Debug: GPIO 20
-
-## Raspberry Pi Setup
-
-Enable SPI and I2C interfaces:
 ```bash
-sudo raspi-config
-# Navigate to Interface Options
-# Enable SPI
-# Enable I2C
-# Reboot
+sudo cp mandeye/services/mandeye_lepton.service /usr/lib/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable mandeye_lepton
+sudo systemctl start  mandeye_lepton
 ```
 
-## Real-time Performance
+The service waits 20 s after boot to allow USB enumeration before starting.
 
-For optimal frame capture performance, the library supports real-time scheduling:
-- Uses SCHED_FIFO scheduling policy
-- Configurable priority (default: 20)
-- Requires root privileges or CAP_SYS_NICE capability
+## Check status
+
+```bash
+sudo systemctl status mandeye_lepton
+sudo journalctl -fu mandeye_lepton
+```
 
 ## Troubleshooting
 
-### SPI Communication Issues
-- Verify SPI is enabled: `ls /dev/spi*`
-- Check SPI permissions: `sudo chmod 666 /dev/spidev0.0`
-- Reduce SPI speed if experiencing data corruption
-- **Increase SPI buffer size** if experiencing buffer overruns:
-  ```bash
-  # Temporary (until reboot)
-  sudo sh -c 'echo 65536 > /sys/module/spidev/parameters/bufsiz'
-  
-  # Permanent - add to /boot/cmdline.txt or /boot/firmware/cmdline.txt
-  # Add: spidev.bufsiz=65536
-  
-  # Or create a kernel module parameter file
-  sudo sh -c 'echo "options spidev bufsiz=65536" > /etc/modprobe.d/spidev.conf'
-  sudo reboot
-  ```
+**No Pico found**
+```bash
+mandeye_lepton --list
+ls /dev/ttyACM*
+```
 
-### I2C Communication Issues
-- Verify I2C is enabled: `ls /dev/i2c*`
-- Check device address: `i2cdetect -y 1`
-- Ensure proper pull-up resistors on I2C lines
+**Frames skipped (previous frame not saved yet)**
+Reduce `--fps` or check disk write speed.
 
-### GPIO Issues
-- Verify libgpiod is installed
-- Check GPIO permissions
-- Ensure correct chip name: `gpiodetect`
+## Supporting Tools
+
+### cdc_viewer
+
+Live viewer for Lepton cameras connected via Raspberry Pi Pico USB-CDC. Two binaries are built:
+
+| Binary        | Source            | Description                                                                                                                         |
+|---------------|-------------------|-------------------------------------------------------------------------------------------------------------------------------------|
+| `readCDC`     | `readCDC.cpp`     | Single-device CLI viewer — opens a hardcoded Pico serial port, renders frames in a JET-colormap OpenCV window, records to MJPG AVI |
+| `readCDC_gui` | `readCDC_gui.cpp` | Multi-device GUI viewer — auto-discovers all connected Picos, opens one window per device, records per-device AVI                  |
+
+Both tools display:
+- JET colormap thermal image (640×480 upscaled)
+- Mouse crosshair with pixel temperature in °C
+- Telemetry overlay: uptime, frame counter, FPA temperature, housing temperature, frame mean
+
+`readCDC_gui` usage:
+```bash
+readCDC_gui                          # auto-discover all Picos
+readCDC_gui --device /dev/ttyACM0   # specific device
+```
+Press **ESC** to quit.
+
+Output video files are written to the working directory as `lepton_<device_suffix>_<timestamp>.avi`.
+
+### spi_viewer
+
+Diagnostic and capture tools for the direct SPI interface (when the Lepton is connected via SPI/I2C/GPIO rather than through a Pico).
+
+| Binary           | Source               | Description                                                                                                                                                                    |
+|------------------|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `testLeptonApp`  | `testLeptonApp.cpp`  | Full capture test — initialises GPIO (VSYNC pin 21), SPI (`/dev/spidev0.0` at 25 MHz) and I2C, runs for 60 s, saves raw `.bin` frames, 16-bit PNGs, and a JET-colormap AVI  |
+| `leptonRawRead`  | `leptonRawRead.cpp`  | Low-level SPI diagnostic — reads raw VoSPI packets (164 bytes each) and dumps hex to stdout; useful for verifying SPI wiring and signal integrity before using higher-level tools |
+
+`testLeptonApp` requires hardware SPI+I2C+GPIO and root / `CAP_SYS_NICE` for real-time scheduling.
+
+```bash
+./testLeptonApp    # runs for 60 s, writes frame*.png, frame*.bin, output.avi
+./leptonRawRead    # streams raw hex packets to stdout
+```
 
 ## License
 
-This project is provided without any license. All rights are reserved by the author.
-
-You may **not** use, copy, modify, merge, publish, distribute, sublicense, or sell any part of this software unless you obtain explicit written permission from the author.
-
-Contact Author for license of this software.
-
-
-## Contributing
-Due to no-license model no contributions will be accepted.
-
-## Author
-
-Michał Pełka
-
-## Acknowledgments
-
-- FLIR Systems for the Lepton SDK
-- VoSPI protocol implementation based on FLIR documentation
+All rights reserved by the author (Michał Pełka).
+No use, copying, or distribution without explicit written permission.
