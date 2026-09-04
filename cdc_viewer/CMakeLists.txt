@@ -8,5 +8,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND LIBSERIAL_LIBRARY)
     target_link_libraries(readCDC PRIVATE leptonLib ${LIBSERIAL_LIBRARY})
 endif()
 
-add_executable(readCDC_gui readCDC_gui.cpp)
-target_link_libraries(readCDC_gui PRIVATE leptonCDCLib leptonFrameLib)
+# leptonCDCLib is only defined on Linux when LibSerial was found (see
+# lib/CMakeLists.txt); on other platforms it's always defined (built-in
+# POSIX/termios backend, see PicoSerialMac.h).
+if(TARGET leptonCDCLib)
+    add_executable(readCDC_gui readCDC_gui.cpp)
+    target_link_libraries(readCDC_gui PRIVATE leptonCDCLib leptonFrameLib)
+endif()
