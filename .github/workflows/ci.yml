@@ -126,6 +126,40 @@ jobs:
         cd build
         ctest --output-on-failure --verbose
 
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: brew install opencv cmake
+
+    - name: Create build directory
+      run: mkdir -p build
+
+    - name: Configure CMake
+      run: |
+        cd build
+        cmake .. \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DCMAKE_CXX_STANDARD=20
+
+    - name: Build
+      run: |
+        cd build
+        cmake --build . -j$(sysctl -n hw.ncpu)
+
+    - name: Run unit tests
+      run: |
+        cd build
+        ctest --output-on-failure --verbose
+
+    - name: Check build artifacts
+      run: |
+        ls -lh build/cdc_viewer/
+        test -f build/cdc_viewer/readCDC_gui
+
   build-pico-firmware:
     runs-on: ubuntu-latest
 

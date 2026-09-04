@@ -1,12 +1,21 @@
 #include "leptonCDC.h"
 
+#if defined(__linux__)
 #include <SerialPort.h>
+#else
+#include "PicoSerialMac.h"
+#endif
+
 #include <algorithm>
 #include <chrono>
 #include <deque>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
+
+#if defined(__APPLE__)
+#include <glob.h>
+#endif
 
 static bool ends_with(const std::deque<uint8_t>& buffer, const std::vector<uint8_t>& pattern)
 {
@@ -31,6 +40,7 @@ std::string LeptonCDC::simplifyPicoName(const std::string& dev)
 	return filename.substr(nameStart, ifPos - nameStart);
 }
 
+#if defined(__linux__)
 std::vector<std::string> LeptonCDC::listPicos()
 {
 	std::vector<std::string> result;
@@ -46,6 +56,31 @@ std::vector<std::string> LeptonCDC::listPicos()
 	std::sort(result.begin(), result.end());
 	return result;
 }
+#elif defined(__APPLE__)
+std::vector<std::string> LeptonCDC::listPicos()
+{
+	// macOS has no by-id symlinks; a Pico's CDC-ACM interface shows up as
+	// /dev/cu.usbmodemXXXX. There's no cheap way to further filter these to
+	// "is actually a Pico" without linking IOKit, so treat every usbmodem
+	// device as a candidate (use --device to be explicit if others are attached).
+	std::vector<std::string> result;
+	glob_t g{};
+	if(glob("/dev/cu.usbmodem*", 0, nullptr, &g) == 0)
+	{
+		for(size_t i = 0; i < g.gl_pathc; ++i)
+			result.emplace_back(g.gl_pathv[i]);
+	}
+	globfree(&g);
+	std::sort(result.begin(), result.end());
+	return result;
+}
+#else
+std::vector<std::string> LeptonCDC::listPicos()
+{
+	std::cerr << "LeptonCDC::listPicos: auto-discovery not implemented on this platform; use --device" << std::endl;
+	return {};
+}
+#endif
 
 bool LeptonCDC::open(const std::string& device)
 {
@@ -55,11 +90,19 @@ bool LeptonCDC::open(const std::string& device)
 
 void LeptonCDC::run()
 {
+#if defined(__linux__)
 	LibSerial::SerialPort serial;
+#else
+	picoserial::SerialPort serial;
+#endif
 	try
 	{
 		serial.Open(m_device, std::ios_base::in | std::ios_base::out);
+#if defined(__linux__)
 		serial.SetBaudRate(LibSerial::BaudRate::BAUD_4000000);
+#else
+		serial.SetBaudRate(4000000);
+#endif
 	}
 	catch(const std::exception& e)
 	{

@@ -1,5 +1,5 @@
 #include "leptonCDC.h"
-#include "lepton.h"
+#include "leptonFrame.h"
 #include "voisp.h"
 
 #include <chrono>
@@ -33,11 +33,11 @@ struct PicoViewer
 // Build a colored display frame from raw uint16 + telemetry + mouse position
 // --------------------------------------------------------------------------
 static cv::Mat buildDisplayFrame(const cv::Mat& raw16,
-								 const std::optional<lepton::Telemetry>& telemetry,
+								 const std::optional<leptonframe::Telemetry>& telemetry,
 								 cv::Point mousePos)
 {
 	cv::Mat scaled640, raw640;
-	cv::resize(lepton::Lepton::ScaleToU8(raw16), scaled640, cv::Size(640, 480));
+	cv::resize(leptonframe::ScaleToU8(raw16), scaled640, cv::Size(640, 480));
 	cv::resize(raw16, raw640, cv::Size(640, 480));
 
 	cv::Mat color;
@@ -90,7 +90,7 @@ static void picoWorker(const std::string& device, PicoViewer* viewer)
 		for(int i = 0; i < 4; ++i)
 			spans.emplace_back(blob.data() + i * segSize, segSize);
 
-		const auto [unscaled, telemetry] = lepton::Lepton::ProcessDataSegmentsToMatU16(spans, isTelemetry);
+		const auto [unscaled, telemetry] = leptonframe::ProcessDataSegmentsToMatU16(spans, isTelemetry);
 
 		cv::Point mp;
 		{
