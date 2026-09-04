@@ -1,13 +1,13 @@
 cmake_minimum_required(VERSION 3.13)
-# --- Enforce 32-bit enums globally BEFORE including Pico/FreeRTOS ---
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-short-enums")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-short-enums")
+# --- Enforce 32-bit enums globally ---
+# Note: this must NOT be done via set(CMAKE_C_FLAGS ...) before project(),
+# since that creates a normal variable that shadows the CACHE variable
+# pico-sdk's toolchain file initializes with -mcpu/-mthumb, breaking the
+# build. add_compile_options() applies cleanly without clobbering it.
 add_compile_options(-fno-short-enums)
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Default build type" FORCE)
 endif()
-
-set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fno-short-enums")
 
 include($ENV{PICO_SDK_PATH}/pico_sdk_init.cmake)
 # Pull in FreeRTOS
