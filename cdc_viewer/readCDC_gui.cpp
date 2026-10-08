@@ -116,7 +116,7 @@ static void picoWorker(const std::string& device, PicoViewer* viewer)
 
 			// 8-bit PNG — JET colormap for visual inspection
 			cv::Mat jet;
-			cv::applyColorMap(lepton::Lepton::ScaleToU8(unscaled), jet, cv::COLORMAP_JET);
+			cv::applyColorMap(leptonframe::ScaleToU8(unscaled), jet, cv::COLORMAP_JET);
 			cv::imwrite(base + "_visual.png", jet);
 		}
 
