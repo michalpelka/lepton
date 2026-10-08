@@ -3,6 +3,7 @@
 #include "voisp.h"
 
 #include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -27,6 +28,9 @@ struct PicoViewer
 
 	cv::VideoWriter writer;
 	bool writerOpened = false;
+
+	std::filesystem::path recordDir; // empty = recording disabled
+	std::chrono::steady_clock::time_point lastRecorded{};
 };
 
 // --------------------------------------------------------------------------
@@ -82,7 +86,7 @@ static void picoWorker(const std::string& device, PicoViewer* viewer)
 	LeptonCDC cdc;
 	cdc.open(device);
 
-	cdc.setFrameCallback([viewer](int /*frameNo*/, int64_t /*ts*/, const std::vector<uint8_t>& blob) {
+	cdc.setFrameCallback([viewer](int /*frameNo*/, int64_t ts, const std::vector<uint8_t>& blob) {
 		const bool isTelemetry = (blob.size() / VoISP::VoISPPacketSize == 244);
 		const int segSize = static_cast<int>(blob.size()) / 4;
 
@@ -99,6 +103,22 @@ static void picoWorker(const std::string& device, PicoViewer* viewer)
 		}
 
 		cv::Mat display = buildDisplayFrame(unscaled, telemetry, mp);
+
+		// Periodic snapshot (raw 16-bit + visual) every 1 s
+		const auto now = std::chrono::steady_clock::now();
+		if(!viewer->recordDir.empty() && now - viewer->lastRecorded >= std::chrono::seconds(1))
+		{
+			viewer->lastRecorded = now;
+			const std::string base = (viewer->recordDir / std::to_string(ts)).string();
+
+			// 16-bit PNG — preserves full radiometric data (CV_16UC1)
+			cv::imwrite(base + ".png", unscaled);
+
+			// 8-bit PNG — JET colormap for visual inspection
+			cv::Mat jet;
+			cv::applyColorMap(lepton::Lepton::ScaleToU8(unscaled), jet, cv::COLORMAP_JET);
+			cv::imwrite(base + "_visual.png", jet);
+		}
 
 		// Lazy video writer init
 		if(!viewer->writerOpened)
@@ -129,16 +149,21 @@ static void picoWorker(const std::string& device, PicoViewer* viewer)
 int main(int argc, char** argv)
 {
 	std::vector<std::string> devices;
+	std::filesystem::path recordRoot;
 
 	for(int i = 1; i < argc; ++i)
 	{
 		std::string arg = argv[i];
 		if(arg == "--device" && i + 1 < argc)
 			devices.push_back(argv[++i]);
+		else if(arg == "--record" && i + 1 < argc)
+			recordRoot = argv[++i];
 		else if(arg == "--help" || arg == "-h")
 		{
-			std::cout << "Usage: " << argv[0] << " [--device <path>]\n"
-					  << "  Auto-discovers all connected Raspberry Pi Picos if no --device given.\n";
+			std::cout << "Usage: " << argv[0] << " [--device <path>] [--record <dir>]\n"
+					  << "  Auto-discovers all connected Raspberry Pi Picos if no --device given.\n"
+					  << "  --record <dir>  Every 1 s save raw 16-bit PNG and JET visual PNG\n"
+					  << "                  to <dir>/<pico-serial>/<timestampNs>[_visual].png\n";
 			return 0;
 		}
 	}
@@ -162,6 +187,12 @@ int main(int argc, char** argv)
 		auto v = std::make_unique<PicoViewer>();
 		v->device = devices[i];
 		v->windowName = "Lepton [" + std::to_string(i) + "] " + devices[i];
+		if(!recordRoot.empty())
+		{
+			v->recordDir = recordRoot / LeptonCDC::simplifyPicoName(devices[i]);
+			std::filesystem::create_directories(v->recordDir);
+			std::cout << "Recording " << devices[i] << " -> " << v->recordDir << std::endl;
+		}
 		cv::namedWindow(v->windowName, cv::WINDOW_AUTOSIZE);
 		cv::setMouseCallback(v->windowName, [](int event, int x, int y, int, void* ud) {
 			if(event == cv::EVENT_MOUSEMOVE)
