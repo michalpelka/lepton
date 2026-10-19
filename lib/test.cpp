@@ -57,3 +57,75 @@ TEST (LeptonTest, TestSegment) {
 }
 
 
+
+#include "leptonCDCParser.h"
+#include <random>
+
+namespace {
+std::vector<uint8_t> makeCDCFrame(int frameNo, const std::vector<uint8_t>& payload)
+{
+    const std::string header = "LEPTON " + std::to_string(frameNo) + " " + std::to_string(payload.size()) + "\n";
+    std::vector<uint8_t> out(header.begin(), header.end());
+    out.insert(out.end(), payload.begin(), payload.end());
+    return out;
+}
+
+// Junk, then frames 1..4, each payload containing a fake "LEPTON " to make
+// sure the parser doesn't resync inside the payload.
+std::vector<uint8_t> makeCDCStream()
+{
+    std::vector<uint8_t> stream = {'x', 'L', 'E', 'P', 'L', 'E', 'P', 'T', 'O', 'N', 'X'};
+    for(int f = 1; f <= 4; ++f)
+    {
+        std::vector<uint8_t> payload(1000, static_cast<uint8_t>(f));
+        const std::string fake = "LEPTON 99 5\n";
+        std::copy(fake.begin(), fake.end(), payload.begin() + 100);
+        const auto frame = makeCDCFrame(f, payload);
+        stream.insert(stream.end(), frame.begin(), frame.end());
+    }
+    return stream;
+}
+
+std::vector<int> parseInChunks(const std::vector<uint8_t>& stream, std::function<size_t()> chunkSize)
+{
+    LeptonCDCParser parser;
+    std::vector<int> frames;
+    parser.setFrameCallback([&](int frameNo, const std::vector<uint8_t>& blob) {
+        EXPECT_EQ(blob.size(), 1000u);
+        EXPECT_EQ(blob[0], frameNo);
+        frames.push_back(frameNo);
+    });
+    for(size_t i = 0; i < stream.size();)
+    {
+        const size_t n = std::min(chunkSize(), stream.size() - i);
+        parser.feed(stream.data() + i, n);
+        i += n;
+    }
+    return frames;
+}
+} // namespace
+
+TEST(LeptonCDCParserTest, WholeStreamDropsFirstFrame) {
+    const auto stream = makeCDCStream();
+    EXPECT_EQ(parseInChunks(stream, [&] { return stream.size(); }), (std::vector<int>{2, 3, 4}));
+}
+
+TEST(LeptonCDCParserTest, ByteByByte) {
+    EXPECT_EQ(parseInChunks(makeCDCStream(), [] { return size_t{1}; }), (std::vector<int>{2, 3, 4}));
+}
+
+TEST(LeptonCDCParserTest, RandomChunks) {
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<size_t> dist(1, 700);
+    EXPECT_EQ(parseInChunks(makeCDCStream(), [&] { return dist(rng); }), (std::vector<int>{2, 3, 4}));
+}
+
+TEST(LeptonCDCParserTest, IgnoresOutOfOrderFrame) {
+    std::vector<uint8_t> stream;
+    for(int f : {5, 6, 3, 7})
+    {
+        const auto frame = makeCDCFrame(f, std::vector<uint8_t>(1000, static_cast<uint8_t>(f)));
+        stream.insert(stream.end(), frame.begin(), frame.end());
+    }
+    EXPECT_EQ(parseInChunks(stream, [] { return size_t{64}; }), (std::vector<int>{6, 7}));
+}

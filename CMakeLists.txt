@@ -7,9 +7,13 @@ find_package(PkgConfig REQUIRED)
 find_package(OpenCV REQUIRED)
 message(STATUS "Found OpenCV ${OpenCV_VERSION}")
 
-find_library(GPIOD_LIBRARY NAMES libgpiod.so)
-if(NOT GPIOD_LIBRARY)
-    message(FATAL_ERROR "gpiod library not found. Install: apt install libgpiod-dev")
+# Direct SPI/I2C/GPIO access to the Lepton (spi_viewer, leptonLib) is
+# Raspberry Pi/Linux-only.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_library(GPIOD_LIBRARY NAMES libgpiod.so)
+    if(NOT GPIOD_LIBRARY)
+        message(FATAL_ERROR "gpiod library not found. Install: apt install libgpiod-dev")
+    endif()
 endif()
 
 find_path(LIBSERIAL_INCLUDE_DIR SerialPort.h
@@ -21,12 +25,17 @@ find_library(LIBSERIAL_LIBRARY
     PATHS /usr/lib)
 
 add_subdirectory(lib)
-add_subdirectory(spi_viewer)
 
-if(LIBSERIAL_LIBRARY)
-    message(STATUS "LibSerial found — building cdc_viewer and mandeye")
-    add_subdirectory(cdc_viewer)
-    add_subdirectory(mandeye)
-else()
-    message(STATUS "LibSerial not found — skipping cdc_viewer and mandeye")
+# cdc_viewer (readCDC_gui) is portable — builds without gpiod/LibSerial on
+# non-Linux platforms (e.g. macOS), using a built-in POSIX/termios reader.
+add_subdirectory(cdc_viewer)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(spi_viewer)
+    if(LIBSERIAL_LIBRARY)
+        message(STATUS "LibSerial found — building mandeye")
+        add_subdirectory(mandeye)
+    else()
+        message(STATUS "LibSerial not found — skipping mandeye")
+    endif()
 endif()

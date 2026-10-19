@@ -52,6 +52,18 @@ target_link_libraries(lepton_cdc
 
 pico_add_extra_outputs(lepton_cdc)
 
+# TinyUSB buffer sizes. pico_stdio_usb's tusb_config.h defaults them to 64 B at
+# full speed, so every 64 B packet ends in a ZLP and the host gets one packet
+# per 1 ms frame (~64 KB/s on a phone without a hub). Larger buffers let a
+# whole chunk go out as one multi-packet transfer. These must be set here:
+# #defines in main.cpp don't reach TinyUSB's own sources.
+# RX must be >= EP_BUFSIZE or TinyUSB never arms the OUT endpoint.
+target_compile_definitions(lepton_cdc PRIVATE
+        CFG_TUD_CDC_TX_BUFSIZE=8192
+        CFG_TUD_CDC_RX_BUFSIZE=4096
+        CFG_TUD_CDC_EP_BUFSIZE=4096
+)
+
 # enable UART output
 pico_enable_stdio_uart(lepton_cdc 0)
 pico_enable_stdio_usb(lepton_cdc 1)

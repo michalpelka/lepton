@@ -1,6 +1,3 @@
-#define CFG_TUD_CDC_RX_BUFSIZE 16*2048
-#define CFG_TUD_CDC_EP_BUFSIZE 16*2048
-
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/watchdog.h"
