@@ -113,6 +113,12 @@ namespace leptonframe {
     // Scale a 16-bit raw image to 8-bit using its own min/max, for display.
     cv::Mat ScaleToU8(const cv::Mat& mat);
 
+    // 640x480 BGR JET-colormapped view with telemetry overlay, plus a
+    // crosshair and temperature readout at mousePos (in 640x480 coordinates;
+    // pass {-1, -1} for none). Shared by the desktop and Android viewers.
+    cv::Mat RenderDisplayFrame(const cv::Mat& raw16, const std::optional<Telemetry>& telemetry,
+                               cv::Point mousePos);
+
     void printTelemetry(const Telemetry& t);
 
 } // namespace leptonframe

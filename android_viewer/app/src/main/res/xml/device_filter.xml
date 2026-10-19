@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Raspberry Pi vendor ID 0x2E8A (any Pico running the lepton firmware) -->
+    <usb-device vendor-id="11914" />
+</resources>

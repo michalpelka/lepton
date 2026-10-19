@@ -34,51 +34,6 @@ struct PicoViewer
 };
 
 // --------------------------------------------------------------------------
-// Build a colored display frame from raw uint16 + telemetry + mouse position
-// --------------------------------------------------------------------------
-static cv::Mat buildDisplayFrame(const cv::Mat& raw16,
-								 const std::optional<leptonframe::Telemetry>& telemetry,
-								 cv::Point mousePos)
-{
-	cv::Mat scaled640, raw640;
-	cv::resize(leptonframe::ScaleToU8(raw16), scaled640, cv::Size(640, 480));
-	cv::resize(raw16, raw640, cv::Size(640, 480));
-
-	cv::Mat color;
-	cv::applyColorMap(scaled640, color, cv::COLORMAP_JET);
-
-	// Mouse crosshair + temperature
-	if(mousePos.x >= 0 && mousePos.y >= 0 && mousePos.x < color.cols && mousePos.y < color.rows)
-	{
-		uint16_t raw = raw640.at<uint16_t>(mousePos);
-		double tempC = raw * 0.01 - 273.15;
-
-		cv::line(color, {mousePos.x, 0}, {mousePos.x, color.rows - 1}, {0, 255, 0}, 1);
-		cv::line(color, {0, mousePos.y}, {color.cols - 1, mousePos.y}, {0, 255, 0}, 1);
-		cv::putText(color, std::to_string(tempC) + " C",
-					{mousePos.x + 20, mousePos.y + 20},
-					cv::FONT_HERSHEY_SIMPLEX, 0.5, {0, 255, 0});
-	}
-
-	// Telemetry overlay
-	if(telemetry)
-	{
-		cv::putText(color, "Uptime : " + std::to_string(telemetry->A.timeCounterMs),
-					{10, 20}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 255});
-		cv::putText(color, "Frame  : " + std::to_string(telemetry->A.frameCounter),
-					{10, 40}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 255});
-		cv::putText(color, "Housing: " + std::to_string(float(telemetry->A.housingTempKelvinX100) / 100.0f - 273.0f) + " C",
-					{10, 60}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 255});
-		cv::putText(color, "FPA    : " + std::to_string(float(telemetry->A.fpaTempKelvinX100) / 100.0f - 273.15f) + " C",
-					{10, 80}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 255});
-		cv::putText(color, "Mean   : " + std::to_string(telemetry->A.frameMean),
-					{10, 100}, cv::FONT_HERSHEY_SIMPLEX, 0.5, {255, 255, 255});
-	}
-
-	return color;
-}
-
-// --------------------------------------------------------------------------
 // Worker thread for one Pico
 // --------------------------------------------------------------------------
 static void picoWorker(const std::string& device, PicoViewer* viewer)
@@ -102,7 +57,7 @@ static void picoWorker(const std::string& device, PicoViewer* viewer)
 			mp = viewer->mousePos;
 		}
 
-		cv::Mat display = buildDisplayFrame(unscaled, telemetry, mp);
+		cv::Mat display = leptonframe::RenderDisplayFrame(unscaled, telemetry, mp);
 
 		// Periodic snapshot (raw 16-bit + visual) every 1 s
 		const auto now = std::chrono::steady_clock::now();

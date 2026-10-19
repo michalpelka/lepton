@@ -14,6 +14,11 @@ add_library(leptonFrameLib leptonFrame.cpp voisp.cpp)
 target_include_directories(leptonFrameLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(leptonFrameLib PUBLIC ${OpenCV_LIBS})
 
+# Transport-independent parser for the Pico CDC frame stream (fed byte chunks;
+# used by the Android viewer, which gets data from USB bulk transfers).
+add_library(leptonCDCParserLib leptonCDCParser.cpp)
+target_include_directories(leptonCDCParserLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 # CDC (USB-serial-to-Pico) transport. Uses LibSerial on Linux (so still
 # requires it there, same as before); on other platforms it falls back to a
 # small built-in POSIX/termios reader (see PicoSerialMac.h), so no LibSerial
@@ -36,5 +41,5 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 enable_testing()
 add_executable(test_simple test.cpp)
-target_link_libraries(test_simple gtest_main)
+target_link_libraries(test_simple gtest_main leptonCDCParserLib)
 add_test(NAME simple_tests COMMAND test_simple)
